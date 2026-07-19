@@ -30,3 +30,33 @@ jobs:
             bin/asdl-agent-mac
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy:
+    runs-on: [self-hosted, Linux, X64]
+    needs: release
+    steps:
+      - name: Dispatch agent update to all nodes
+        run: |
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST http://localhost:8080/api/v1/agents/deploy \
+            -H "Authorization: Bearer ${{ secrets.ASDL_TOKEN }}")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          echo "HTTP Code: $HTTP_CODE"
+          echo "Response: $BODY"
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "❌ Agent deploy dispatch failed"
+            echo "$BODY"
+            exit 1
+          fi
+
+          echo "✅ Agent update dispatched to all nodes"
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "=== Release Summary ==="
+          echo "Tag: ${{ github.ref_name }}"
+          echo "Commit: ${{ github.sha }}"
