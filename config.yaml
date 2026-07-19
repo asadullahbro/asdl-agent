@@ -1,5 +1,0 @@
-hub_url: "http://10.100.0.1:8080"
-vpn_ip: "10.100.0.5"
-interval: 30s
-work_dir: "/tmp/asdl"
-max_jobs: 5
