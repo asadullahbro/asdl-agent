@@ -31,6 +31,11 @@ type Heartbeat struct {
     Timestamp    time.Time `json:"timestamp"`
 }
 
+type EnvVar struct {
+    Key   string `json:"key"`
+    Value string `json:"value"`
+}
+
 type JobPayload struct {
     Image        string    `json:"image"`
     ContainerName string   `json:"container_name"`
