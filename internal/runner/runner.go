@@ -7,6 +7,7 @@ import (
     "io"
     "os"
     "os/exec"
+    "strings"
     "sync"
     "time"
 
@@ -27,7 +28,6 @@ type runningJob struct {
 }
 
 func NewRunner(workDir string) *Runner {
-    // Create work directory if it doesn't exist
     if err := os.MkdirAll(workDir, 0755); err != nil {
         // Log but continue
     }
@@ -38,7 +38,87 @@ func NewRunner(workDir string) *Runner {
     }
 }
 
+// BuildCommands generates shell script lines if job.Command is empty but Payload exists
+func (r *Runner) BuildCommands(job *models.Job) string {
+    if strings.TrimSpace(job.Command) != "" {
+        return job.Command
+    }
+
+    if job.Payload == nil {
+        return ""
+    }
+
+    p := job.Payload
+    var cmds []string
+
+    switch job.Type {
+    case "migrate_start", "deploy":
+        // 1. Pull or Clone
+        if p.Repository != "" {
+            cmds = append(cmds, fmt.Sprintf(
+                "echo \"🔨 Building from repo: %s\"\ncd /tmp\nrm -rf %s\ngit clone %s %s\ncd %s\ngit checkout main || git checkout master || true\ndocker build -t %s .",
+                p.Repository, p.ContainerName, p.Repository, p.ContainerName, p.ContainerName, p.Image,
+            ))
+        } else if p.Image != "" {
+            cmds = append(cmds, fmt.Sprintf("echo \"📥 Pulling image: %s\"\ndocker pull %s", p.Image, p.Image))
+        }
+
+        // 2. Stop and remove existing container
+        cmds = append(cmds, fmt.Sprintf("echo \"🛑 Cleaning old container...\"\ndocker stop %s 2>/dev/null || true\ndocker rm %s 2>/dev/null || true", p.ContainerName, p.ContainerName))
+
+        // 3. Build docker run
+        var runParts []string
+        runParts = append(runParts, fmt.Sprintf("docker run -d --name %s --restart unless-stopped", p.ContainerName))
+
+        for _, port := range p.Ports {
+            if port != "" {
+                runParts = append(runParts, fmt.Sprintf("-p %s", port))
+            }
+        }
+        for _, vol := range p.Volumes {
+            if vol != "" {
+                runParts = append(runParts, fmt.Sprintf("-v %s", vol))
+            }
+        }
+        for _, env := range p.EnvVars {
+            if env.Key != "" {
+                runParts = append(runParts, fmt.Sprintf("-e %s=%s", env.Key, env.Value))
+            }
+        }
+        runParts = append(runParts, p.Image)
+
+        cmds = append(cmds, fmt.Sprintf("echo \"🚀 Starting container: %s\"\n%s", p.ContainerName, strings.Join(runParts, " ")))
+
+    case "failover_start":
+        cmds = append(cmds, fmt.Sprintf("docker stop %s 2>/dev/null || true\ndocker rm %s 2>/dev/null || true", p.ContainerName, p.ContainerName))
+        if p.SourceNodeIP != "" && p.Image != "" {
+            cmds = append(cmds, fmt.Sprintf("ssh -o StrictHostKeyChecking=no %s \"docker save %s\" | docker load || docker pull %s", p.SourceNodeIP, p.Image, p.Image))
+        } else if p.Image != "" {
+            cmds = append(cmds, fmt.Sprintf("docker pull %s", p.Image))
+        }
+        
+        var runParts []string
+        runParts = append(runParts, fmt.Sprintf("docker run -d --name %s --restart unless-stopped", p.ContainerName))
+        for _, port := range p.Ports {
+            if port != "" { runParts = append(runParts, fmt.Sprintf("-p %s", port)) }
+        }
+        for _, vol := range p.Volumes {
+            if vol != "" { runParts = append(runParts, fmt.Sprintf("-v %s", vol)) }
+        }
+        for _, env := range p.EnvVars {
+            if env.Key != "" { runParts = append(runParts, fmt.Sprintf("-e %s=%s", env.Key, env.Value)) }
+        }
+        runParts = append(runParts, p.Image)
+        cmds = append(cmds, strings.Join(runParts, " "))
+    }
+
+    return strings.Join(cmds, "\n\n")
+}
+
 func (r *Runner) Execute(ctx context.Context, job *models.Job) (*models.JobResult, error) {
+    // Resolve full command string (uses payload if command is empty)
+    execCmdStr := r.BuildCommands(job)
+
     // Create job-specific working directory
     jobDir := fmt.Sprintf("%s/%s", r.workDir, job.ID)
     if err := os.MkdirAll(jobDir, 0755); err != nil {
@@ -52,12 +132,24 @@ func (r *Runner) Execute(ctx context.Context, job *models.Job) (*models.JobResul
     var logBuffer bytes.Buffer
     logBuffer.WriteString(fmt.Sprintf("=== Job %s started at %s ===\n", job.ID, time.Now().Format(time.RFC3339)))
     logBuffer.WriteString(fmt.Sprintf("Type: %s\n", job.Type))
-    logBuffer.WriteString(fmt.Sprintf("Command: %s\n", job.Command))
+    logBuffer.WriteString(fmt.Sprintf("Command:\n%s\n", execCmdStr))
     logBuffer.WriteString(fmt.Sprintf("Working Dir: %s\n", job.WorkingDir))
     logBuffer.WriteString("====================================\n\n")
 
+    // If there is still no command to execute, fail gracefully
+    if strings.TrimSpace(execCmdStr) == "" {
+        logBuffer.WriteString("❌ Error: No command or valid payload provided for job execution\n")
+        return &models.JobResult{
+            JobID:    job.ID,
+            Status:   "failed",
+            Logs:     logBuffer.String(),
+            ExitCode: 1,
+            Duration: 0,
+        }, nil
+    }
+
     // Prepare command
-    cmd := exec.CommandContext(ctx, "sh", "-c", job.Command)
+    cmd := exec.CommandContext(ctx, "sh", "-c", execCmdStr)
     cmd.Dir = jobDir
 
     // Set environment variables
