@@ -1,10 +1,8 @@
 name: Release Agent
-
 on:
   push:
     tags:
       - 'v*'
-
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -12,38 +10,31 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
         with:
           go-version: '1.22'
-
       - name: Build binaries
         run: |
           mkdir -p bin
           GOOS=linux GOARCH=amd64 go build -o bin/asdl-agent-linux ./cmd/agent
           GOOS=darwin GOARCH=amd64 go build -o bin/asdl-agent-mac ./cmd/agent
           GOOS=windows GOARCH=amd64 go build -o bin/asdl-agent-windows.exe ./cmd/agent
-
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           name: "Agent ${{ github.ref_name }}"
           body: |
             ## ASDL Agent ${{ github.ref_name }}
-
             ### Changes
             ${{ github.event.head_commit.message }}
-
             ### Download
             - `asdl-agent-linux` — Linux x86_64
             - `asdl-agent-mac` — macOS x86_64
             - `asdl-agent-windows.exe` — Windows x86_64 (not fully supported yet)
-
             ### Install
 ```bash
             # Linux
             curl -fsSL https://github.com/asadullahbro/asdl-agent/releases/latest/download/asdl-agent-linux -o /usr/local/bin/asdl-agent && chmod +x /usr/local/bin/asdl-agent
-
             # macOS
             curl -fsSL https://github.com/asadullahbro/asdl-agent/releases/latest/download/asdl-agent-mac -o /usr/local/bin/asdl-agent && chmod +x /usr/local/bin/asdl-agent
 ```
@@ -53,7 +44,6 @@ jobs:
             bin/asdl-agent-windows.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
   deploy:
     runs-on: [self-hosted, Linux, X64]
     needs: release
@@ -62,23 +52,18 @@ jobs:
         run: |
           RESPONSE=$(curl -s -w "\n%{http_code}" -X POST http://localhost:8080/api/v1/agents/deploy \
             -H "Authorization: Bearer ${{ secrets.ASDL_TOKEN }}")
-
           HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
           BODY=$(echo "$RESPONSE" | sed '$d')
-
           echo "HTTP Code: $HTTP_CODE"
           echo "Response: $BODY"
-
           if [ "$HTTP_CODE" != "200" ]; then
             echo "❌ Agent deploy dispatch failed"
             echo "$BODY"
             exit 1
           fi
-
           DISPATCHED=$(echo "$BODY" | jq -r '.dispatched // 0')
           TOTAL=$(echo "$BODY" | jq -r '.total // 0')
           echo "✅ Agent update dispatched to $DISPATCHED/$TOTAL nodes"
-
       - name: Summary
         if: always()
         run: |
