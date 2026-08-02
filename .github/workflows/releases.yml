@@ -25,18 +25,28 @@ jobs:
           name: "Agent ${{ github.ref_name }}"
           body: |
             ## ASDL Agent ${{ github.ref_name }}
+
             ### Changes
             ${{ github.event.head_commit.message }}
+
             ### Download
-            - `asdl-agent-linux` — Linux x86_64
-            - `asdl-agent-mac` — macOS x86_64
-            - `asdl-agent-windows.exe` — Windows x86_64 (not fully supported yet)
+            - asdl-agent-linux — Linux x86_64
+            - asdl-agent-mac — macOS x86_64
+            - asdl-agent-windows.exe — Windows x86_64
+
             ### Install
+
             Linux:
             curl -fsSL https://github.com/asadullahbro/asdl-agent/releases/latest/download/asdl-agent-linux -o /usr/local/bin/asdl-agent && chmod +x /usr/local/bin/asdl-agent
 
             macOS:
             curl -fsSL https://github.com/asadullahbro/asdl-agent/releases/latest/download/asdl-agent-mac -o /usr/local/bin/asdl-agent && chmod +x /usr/local/bin/asdl-agent
+          files: |
+            bin/asdl-agent-linux
+            bin/asdl-agent-mac
+            bin/asdl-agent-windows.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   deploy:
     runs-on: [self-hosted, Linux, X64]
     needs: release
@@ -50,13 +60,13 @@ jobs:
           echo "HTTP Code: $HTTP_CODE"
           echo "Response: $BODY"
           if [ "$HTTP_CODE" != "200" ]; then
-            echo "❌ Agent deploy dispatch failed"
+            echo "Agent deploy dispatch failed"
             echo "$BODY"
             exit 1
           fi
           DISPATCHED=$(echo "$BODY" | jq -r '.dispatched // 0')
           TOTAL=$(echo "$BODY" | jq -r '.total // 0')
-          echo "✅ Agent update dispatched to $DISPATCHED/$TOTAL nodes"
+          echo "Agent update dispatched to $DISPATCHED/$TOTAL nodes"
       - name: Summary
         if: always()
         run: |
@@ -65,3 +75,4 @@ jobs:
           echo "Commit:  ${{ github.sha }}"
           echo "Message: ${{ github.event.head_commit.message }}"
           echo "Time:    $(date)"
+          
