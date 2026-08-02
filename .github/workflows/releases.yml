@@ -32,18 +32,11 @@ jobs:
             - `asdl-agent-mac` — macOS x86_64
             - `asdl-agent-windows.exe` — Windows x86_64 (not fully supported yet)
             ### Install
-```bash
-            # Linux
+            Linux:
             curl -fsSL https://github.com/asadullahbro/asdl-agent/releases/latest/download/asdl-agent-linux -o /usr/local/bin/asdl-agent && chmod +x /usr/local/bin/asdl-agent
-            # macOS
+
+            macOS:
             curl -fsSL https://github.com/asadullahbro/asdl-agent/releases/latest/download/asdl-agent-mac -o /usr/local/bin/asdl-agent && chmod +x /usr/local/bin/asdl-agent
-```
-          files: |
-            bin/asdl-agent-linux
-            bin/asdl-agent-mac
-            bin/asdl-agent-windows.exe
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   deploy:
     runs-on: [self-hosted, Linux, X64]
     needs: release
