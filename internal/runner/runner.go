@@ -37,27 +37,111 @@ func NewRunner(workDir string) *Runner {
         jobs:    make(map[string]*runningJob),
     }
 }
+func (r *Runner) buildCommandFromPayload(job *models.Job) string {
+    if job.Command != "" {
+        return job.Command
+    }
+
+    if job.Payload == nil {
+        return ""
+    }
+
+    p := job.Payload
+
+    ports := ""
+    for _, port := range p.Ports {
+        ports += fmt.Sprintf("-p %s ", port)
+    }
+
+    volumes := ""
+    for _, vol := range p.Volumes {
+        volumes += fmt.Sprintf("-v %s ", vol)
+    }
+
+    envVars := ""
+    for _, env := range p.EnvVars {
+        envVars += fmt.Sprintf("-e %s='%s' ", env.Key, env.Value)
+    }
+
+    switch job.Type {
+
+    case "migrate_stop", "failover_stop":
+        return fmt.Sprintf(`set -e
+echo "🛑 Stopping container: %s"
+docker stop %s 2>/dev/null || true
+docker rm %s 2>/dev/null || true
+echo "✅ Container stopped"`,
+            p.ContainerName,
+            p.ContainerName,
+            p.ContainerName,
+        )
+
+    case "migrate_start", "failover_start":
+        return fmt.Sprintf(`set -e
+echo "🚀 Starting container: %s"
+echo "🏷️  Image: %s"
+docker stop %s 2>/dev/null || true
+docker rm %s 2>/dev/null || true
+docker run -d \
+    --name %s \
+    --restart unless-stopped \
+    %s %s %s \
+    %s:latest
+echo "✅ Container started"
+docker ps --filter "name=%s"`,
+            p.ContainerName,
+            p.Image,
+            p.ContainerName,
+            p.ContainerName,
+            p.ContainerName,
+            ports,
+            volumes,
+            envVars,
+            p.Image,
+            p.ContainerName,
+        )
+
+    case "image_pull":
+        return fmt.Sprintf(`set -e
+echo "📥 Pulling image: %s"
+docker pull %s:latest
+echo "✅ Image pulled successfully"`,
+            p.Image,
+            p.Repository,
+        )
+
+    default:
+        return ""
+    }
+}
 
 func (r *Runner) Execute(ctx context.Context, job *models.Job) (*models.JobResult, error) {
-    // Create job-specific working directory
     jobDir := fmt.Sprintf("%s/%s", r.workDir, job.ID)
     if err := os.MkdirAll(jobDir, 0755); err != nil {
         return nil, fmt.Errorf("failed to create work dir: %w", err)
     }
-
-    // Ensure cleanup
     defer os.RemoveAll(jobDir)
 
-    // Create log buffer
+    // Build command FIRST
+    command := r.buildCommandFromPayload(job)
+    if command == "" {
+        return &models.JobResult{
+            JobID:    job.ID,
+            Status:   "failed",
+            Logs:     fmt.Sprintf("no command or payload for job type: %s", job.Type),
+            ExitCode: -1,
+        }, nil
+    }
+
+    // Now safe to log it
     var logBuffer bytes.Buffer
     logBuffer.WriteString(fmt.Sprintf("=== Job %s started at %s ===\n", job.ID, time.Now().Format(time.RFC3339)))
     logBuffer.WriteString(fmt.Sprintf("Type: %s\n", job.Type))
-    logBuffer.WriteString(fmt.Sprintf("Command: %s\n", job.Command))
+    logBuffer.WriteString(fmt.Sprintf("Command: %s\n", command))
     logBuffer.WriteString(fmt.Sprintf("Working Dir: %s\n", job.WorkingDir))
     logBuffer.WriteString("====================================\n\n")
 
-    // Prepare command
-    cmd := exec.CommandContext(ctx, "sh", "-c", job.Command)
+    cmd := exec.CommandContext(ctx, "sh", "-c", command)
     cmd.Dir = jobDir
 
     // Set environment variables

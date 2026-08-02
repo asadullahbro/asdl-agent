@@ -37,14 +37,20 @@ type EnvVar struct {
 }
 
 type JobPayload struct {
-    Image        string    `json:"image"`
-    ContainerName string   `json:"container_name"`
-    SourceNodeIP string    `json:"source_node_ip"`
-    Repository   string    `json:"repository"`
-    LastDeployed time.Time `json:"last_deployed"`
-    Ports        []string  `json:"ports"`
-    Volumes      []string  `json:"volumes"`
-    EnvVars      []EnvVar  `json:"env_vars"`
+    Image         string    `json:"image"`
+    ContainerName string    `json:"container_name"`
+    SourceNodeIP  string    `json:"source_node_ip"`
+    Repository    string    `json:"repository"`
+    Branch        string    `json:"branch"`
+    BuildCommand  string    `json:"build_command"`
+    StartCommand  string    `json:"start_command"`
+    InstallCmd    string    `json:"install_cmd"`
+    LastDeployed  time.Time `json:"last_deployed"`
+    Ports         []string  `json:"ports"`
+    Volumes       []string  `json:"volumes"`
+    EnvVars       []EnvVar  `json:"env_vars"`
+    Operation     string    `json:"operation"`
+    MigrationID   string    `json:"migration_id"`
 }
 
 type Job struct {
