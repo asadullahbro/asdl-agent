@@ -2,10 +2,15 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
+	"fmt"
 	"log"
+	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -16,6 +21,9 @@ import (
 	"github.com/asdl/agent/internal/runner"
 	"github.com/asdl/agent/pkg/models"
 )
+
+// Injected at build time via -ldflags
+var Version = "dev"
 
 func main() {
 	configPath := flag.String("config", "config.yaml", "Path to config file")
@@ -35,7 +43,7 @@ func main() {
 		cfg.VPNIP = *vpnIP
 	}
 
-	log.Printf("Starting ASDL Agent")
+	log.Printf("Starting ASDL Agent %s", Version)
 	log.Printf("Hub URL: %s", cfg.HubURL)
 	log.Printf("VPN IP: %s", cfg.VPNIP)
 	log.Printf("Work Dir: %s", cfg.WorkDir)
@@ -82,10 +90,20 @@ func run(ctx context.Context, cfg *config.Config,
 	jobTicker := time.NewTicker(5 * time.Second)
 	defer jobTicker.Stop()
 
+	// Check for updates every 5 minutes
+	updateTicker := time.NewTicker(5 * time.Minute)
+	defer updateTicker.Stop()
+
+	// Also check immediately on startup
+	go selfUpdate(ctx)
+
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+
+		case <-updateTicker.C:
+			go selfUpdate(ctx)
 
 		case <-heartbeatTicker.C:
 			heartbeat, err := mon.GetHeartbeat()
@@ -142,9 +160,87 @@ func run(ctx context.Context, cfg *config.Config,
 				log.Println("🔄 Agent update complete, restarting process...")
 				time.Sleep(1 * time.Second)
 				if err := syscall.Exec(os.Args[0], os.Args, os.Environ()); err != nil {
-					log.Printf("⚠️ Self-restart failed, systemctl will handle it: %v", err)
+					log.Printf("⚠️ Self-restart failed: %v", err)
 				}
 			}
 		}
 	}
+}
+
+func selfUpdate(ctx context.Context) {
+	latest, err := getLatestVersion()
+	if err != nil {
+		log.Printf("⚠️ Version check failed: %v", err)
+		return
+	}
+
+	if latest == Version {
+		log.Printf("✅ Agent is up to date (%s)", Version)
+		return
+	}
+
+	log.Printf("🔄 New version available: %s (current: %s), updating...", latest, Version)
+
+	binary := "asdl-agent-linux"
+	if runtime.GOOS == "darwin" {
+		binary = "asdl-agent-mac"
+	}
+
+	url := fmt.Sprintf("https://github.com/asadullahbro/asdl-agent/releases/latest/download/%s", binary)
+	checksumURL := "https://github.com/asadullahbro/asdl-agent/releases/latest/download/checksums.txt"
+
+	// Download
+	if out, err := exec.CommandContext(ctx, "curl", "-fsSL", url, "-o", "/tmp/asdl-agent-new").CombinedOutput(); err != nil {
+		log.Printf("⚠️ Download failed: %v\n%s", err, out)
+		return
+	}
+
+	// Verify checksum
+	expected, err := exec.CommandContext(ctx, "sh", "-c",
+		fmt.Sprintf(`curl -fsSL %s | grep "%s" | awk '{print $1}'`, checksumURL, binary)).Output()
+	if err != nil {
+		log.Printf("⚠️ Checksum fetch failed: %v", err)
+		return
+	}
+
+	actual, err := exec.CommandContext(ctx, "sh", "-c", "sha256sum /tmp/asdl-agent-new | awk '{print $1}'").Output()
+	if err != nil {
+		log.Printf("⚠️ Checksum compute failed: %v", err)
+		return
+	}
+
+	if strings.TrimSpace(string(expected)) != strings.TrimSpace(string(actual)) {
+		log.Printf("❌ Checksum mismatch, aborting update")
+		os.Remove("/tmp/asdl-agent-new")
+		return
+	}
+
+	// Replace binary
+	if out, err := exec.CommandContext(ctx, "sh", "-c",
+		"chmod +x /tmp/asdl-agent-new && sudo mv /tmp/asdl-agent-new "+os.Args[0]).CombinedOutput(); err != nil {
+		log.Printf("⚠️ Binary replace failed: %v\n%s", err, out)
+		return
+	}
+
+	log.Printf("✅ Updated to %s, restarting...", latest)
+	time.Sleep(1 * time.Second)
+	syscall.Exec(os.Args[0], os.Args, os.Environ())
+}
+
+func getLatestVersion() (string, error) {
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get("https://api.github.com/repos/asadullahbro/asdl-agent/releases/latest")
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	var release struct {
+		TagName string `json:"tag_name"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return "", err
+	}
+
+	return release.TagName, nil
 }
