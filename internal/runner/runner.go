@@ -7,7 +7,6 @@ import (
     "io"
     "os"
     "os/exec"
-    "strings"
     "sync"
     "time"
 
@@ -28,6 +27,7 @@ type runningJob struct {
 }
 
 func NewRunner(workDir string) *Runner {
+    // Create work directory if it doesn't exist
     if err := os.MkdirAll(workDir, 0755); err != nil {
         // Log but continue
     }
@@ -37,10 +37,8 @@ func NewRunner(workDir string) *Runner {
         jobs:    make(map[string]*runningJob),
     }
 }
-
-// BuildCommands generates shell script lines if job.Command is empty but Payload exists
-func (r *Runner) BuildCommands(job *models.Job) string {
-    if strings.TrimSpace(job.Command) != "" {
+func (r *Runner) buildCommandFromPayload(job *models.Job) string {
+    if job.Command != "" {
         return job.Command
     }
 
@@ -49,107 +47,101 @@ func (r *Runner) BuildCommands(job *models.Job) string {
     }
 
     p := job.Payload
-    var cmds []string
 
-    switch job.Type {
-    case "migrate_start", "deploy":
-        // 1. Pull or Clone
-        if p.Repository != "" {
-            cmds = append(cmds, fmt.Sprintf(
-                "echo \"🔨 Building from repo: %s\"\ncd /tmp\nrm -rf %s\ngit clone %s %s\ncd %s\ngit checkout main || git checkout master || true\ndocker build -t %s .",
-                p.Repository, p.ContainerName, p.Repository, p.ContainerName, p.ContainerName, p.Image,
-            ))
-        } else if p.Image != "" {
-            cmds = append(cmds, fmt.Sprintf("echo \"📥 Pulling image: %s\"\ndocker pull %s", p.Image, p.Image))
-        }
-
-        // 2. Stop and remove existing container
-        cmds = append(cmds, fmt.Sprintf("echo \"🛑 Cleaning old container...\"\ndocker stop %s 2>/dev/null || true\ndocker rm %s 2>/dev/null || true", p.ContainerName, p.ContainerName))
-
-        // 3. Build docker run
-        var runParts []string
-        runParts = append(runParts, fmt.Sprintf("docker run -d --name %s --restart unless-stopped", p.ContainerName))
-
-        for _, port := range p.Ports {
-            if port != "" {
-                runParts = append(runParts, fmt.Sprintf("-p %s", port))
-            }
-        }
-        for _, vol := range p.Volumes {
-            if vol != "" {
-                runParts = append(runParts, fmt.Sprintf("-v %s", vol))
-            }
-        }
-        for _, env := range p.EnvVars {
-            if env.Key != "" {
-                runParts = append(runParts, fmt.Sprintf("-e %s=%s", env.Key, env.Value))
-            }
-        }
-        runParts = append(runParts, p.Image)
-
-        cmds = append(cmds, fmt.Sprintf("echo \"🚀 Starting container: %s\"\n%s", p.ContainerName, strings.Join(runParts, " ")))
-
-    case "failover_start":
-        cmds = append(cmds, fmt.Sprintf("docker stop %s 2>/dev/null || true\ndocker rm %s 2>/dev/null || true", p.ContainerName, p.ContainerName))
-        if p.SourceNodeIP != "" && p.Image != "" {
-            cmds = append(cmds, fmt.Sprintf("ssh -o StrictHostKeyChecking=no %s \"docker save %s\" | docker load || docker pull %s", p.SourceNodeIP, p.Image, p.Image))
-        } else if p.Image != "" {
-            cmds = append(cmds, fmt.Sprintf("docker pull %s", p.Image))
-        }
-        
-        var runParts []string
-        runParts = append(runParts, fmt.Sprintf("docker run -d --name %s --restart unless-stopped", p.ContainerName))
-        for _, port := range p.Ports {
-            if port != "" { runParts = append(runParts, fmt.Sprintf("-p %s", port)) }
-        }
-        for _, vol := range p.Volumes {
-            if vol != "" { runParts = append(runParts, fmt.Sprintf("-v %s", vol)) }
-        }
-        for _, env := range p.EnvVars {
-            if env.Key != "" { runParts = append(runParts, fmt.Sprintf("-e %s=%s", env.Key, env.Value)) }
-        }
-        runParts = append(runParts, p.Image)
-        cmds = append(cmds, strings.Join(runParts, " "))
+    ports := ""
+    for _, port := range p.Ports {
+        ports += fmt.Sprintf("-p %s ", port)
     }
 
-    return strings.Join(cmds, "\n\n")
+    volumes := ""
+    for _, vol := range p.Volumes {
+        volumes += fmt.Sprintf("-v %s ", vol)
+    }
+
+    envVars := ""
+    for _, env := range p.EnvVars {
+        envVars += fmt.Sprintf("-e %s='%s' ", env.Key, env.Value)
+    }
+
+    switch job.Type {
+
+    case "migrate_stop", "failover_stop":
+        return fmt.Sprintf(`set -e
+echo "🛑 Stopping container: %s"
+docker stop %s 2>/dev/null || true
+docker rm %s 2>/dev/null || true
+echo "✅ Container stopped"`,
+            p.ContainerName,
+            p.ContainerName,
+            p.ContainerName,
+        )
+
+    case "migrate_start", "failover_start":
+        return fmt.Sprintf(`set -e
+echo "🚀 Starting container: %s"
+echo "🏷️  Image: %s"
+docker stop %s 2>/dev/null || true
+docker rm %s 2>/dev/null || true
+docker run -d \
+    --name %s \
+    --restart unless-stopped \
+    %s %s %s \
+    %s:latest
+echo "✅ Container started"
+docker ps --filter "name=%s"`,
+            p.ContainerName,
+            p.Image,
+            p.ContainerName,
+            p.ContainerName,
+            p.ContainerName,
+            ports,
+            volumes,
+            envVars,
+            p.Image,
+            p.ContainerName,
+        )
+
+    case "image_pull":
+        return fmt.Sprintf(`set -e
+echo "📥 Pulling image: %s"
+docker pull %s:latest
+echo "✅ Image pulled successfully"`,
+            p.Image,
+            p.Repository,
+        )
+
+    default:
+        return ""
+    }
 }
 
 func (r *Runner) Execute(ctx context.Context, job *models.Job) (*models.JobResult, error) {
-    // Resolve full command string (uses payload if command is empty)
-    execCmdStr := r.BuildCommands(job)
-
-    // Create job-specific working directory
     jobDir := fmt.Sprintf("%s/%s", r.workDir, job.ID)
     if err := os.MkdirAll(jobDir, 0755); err != nil {
         return nil, fmt.Errorf("failed to create work dir: %w", err)
     }
-
-    // Ensure cleanup
     defer os.RemoveAll(jobDir)
 
-    // Create log buffer
-    var logBuffer bytes.Buffer
-    logBuffer.WriteString(fmt.Sprintf("=== Job %s started at %s ===\n", job.ID, time.Now().Format(time.RFC3339)))
-    logBuffer.WriteString(fmt.Sprintf("Type: %s\n", job.Type))
-    logBuffer.WriteString(fmt.Sprintf("Command:\n%s\n", execCmdStr))
-    logBuffer.WriteString(fmt.Sprintf("Working Dir: %s\n", job.WorkingDir))
-    logBuffer.WriteString("====================================\n\n")
-
-    // If there is still no command to execute, fail gracefully
-    if strings.TrimSpace(execCmdStr) == "" {
-        logBuffer.WriteString("❌ Error: No command or valid payload provided for job execution\n")
+    // Build command FIRST
+    command := r.buildCommandFromPayload(job)
+    if command == "" {
         return &models.JobResult{
             JobID:    job.ID,
             Status:   "failed",
-            Logs:     logBuffer.String(),
-            ExitCode: 1,
-            Duration: 0,
+            Logs:     fmt.Sprintf("no command or payload for job type: %s", job.Type),
+            ExitCode: -1,
         }, nil
     }
 
-    // Prepare command
-    cmd := exec.CommandContext(ctx, "sh", "-c", execCmdStr)
+    // Now safe to log it
+    var logBuffer bytes.Buffer
+    logBuffer.WriteString(fmt.Sprintf("=== Job %s started at %s ===\n", job.ID, time.Now().Format(time.RFC3339)))
+    logBuffer.WriteString(fmt.Sprintf("Type: %s\n", job.Type))
+    logBuffer.WriteString(fmt.Sprintf("Command: %s\n", command))
+    logBuffer.WriteString(fmt.Sprintf("Working Dir: %s\n", job.WorkingDir))
+    logBuffer.WriteString("====================================\n\n")
+
+    cmd := exec.CommandContext(ctx, "sh", "-c", command)
     cmd.Dir = jobDir
 
     // Set environment variables

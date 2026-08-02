@@ -2,6 +2,7 @@ package config
 
 import (
     "fmt"
+    "net"
     "os"
     "time"
 
@@ -29,7 +30,6 @@ func Load(path string) (*Config, error) {
         if err != nil {
             return nil, fmt.Errorf("failed to read config: %w", err)
         }
-
         if err := yaml.Unmarshal(data, cfg); err != nil {
             return nil, fmt.Errorf("failed to parse config: %w", err)
         }
@@ -46,13 +46,51 @@ func Load(path string) (*Config, error) {
         cfg.WorkDir = dir
     }
 
+    // Auto-detect WireGuard IP if not set
+    if cfg.VPNIP == "" {
+        cfg.VPNIP = detectWireGuardIP()
+    }
+
     // Validate
     if cfg.HubURL == "" {
         return nil, fmt.Errorf("hub_url is required (set in config or ASDL_HUB_URL env)")
     }
     if cfg.VPNIP == "" {
-        return nil, fmt.Errorf("vpn_ip is required (set in config or ASDL_VPN_IP env)")
+        return nil, fmt.Errorf("vpn_ip could not be detected, set it in config or ASDL_VPN_IP env")
     }
 
     return cfg, nil
+}
+
+func detectWireGuardIP() string {
+    // Try common WireGuard interface names
+    ifaces := []string{"wg0", "wg1", "asdl0"}
+
+    for _, name := range ifaces {
+        iface, err := net.InterfaceByName(name)
+        if err != nil {
+            continue
+        }
+
+        addrs, err := iface.Addrs()
+        if err != nil {
+            continue
+        }
+
+        for _, addr := range addrs {
+            var ip net.IP
+            switch v := addr.(type) {
+            case *net.IPNet:
+                ip = v.IP
+            case *net.IPAddr:
+                ip = v.IP
+            }
+
+            if ip != nil && ip.To4() != nil {
+                return ip.String()
+            }
+        }
+    }
+
+    return ""
 }
