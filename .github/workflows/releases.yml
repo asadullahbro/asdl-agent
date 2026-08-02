@@ -19,6 +19,7 @@ jobs:
           GOOS=linux GOARCH=amd64 go build -o bin/asdl-agent-linux ./cmd/agent
           GOOS=darwin GOARCH=amd64 go build -o bin/asdl-agent-mac ./cmd/agent
           GOOS=windows GOARCH=amd64 go build -o bin/asdl-agent-windows.exe ./cmd/agent
+          cd bin && sha256sum asdl-agent-linux asdl-agent-mac asdl-agent-windows.exe > checksums.txt
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -45,6 +46,7 @@ jobs:
             bin/asdl-agent-linux
             bin/asdl-agent-mac
             bin/asdl-agent-windows.exe
+            bin/checksums.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   deploy:
