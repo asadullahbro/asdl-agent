@@ -1,8 +1,8 @@
 name: Release Agent
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - main
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -10,23 +10,32 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Generate tag
+        id: tag
+        run: |
+          TAG="v$(date +'%Y.%m.%d')-$(git rev-parse --short HEAD)"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          git tag $TAG
+          git push origin $TAG
       - uses: actions/setup-go@v5
         with:
           go-version: '1.22'
       - name: Build binaries
         run: |
           mkdir -p bin
-          VERSION=${GITHUB_REF_NAME}
-          GOOS=linux GOARCH=amd64 go build -ldflags "-X main.Version=${VERSION}" -o bin/asdl-agent-linux ./cmd/agent
-          GOOS=darwin GOARCH=amd64 go build -ldflags "-X main.Version=${VERSION}" -o bin/asdl-agent-mac ./cmd/agent
-          GOOS=windows GOARCH=amd64 go build -ldflags "-X main.Version=${VERSION}" -o bin/asdl-agent-windows.exe ./cmd/agent
+          GOOS=linux GOARCH=amd64 go build -ldflags "-X main.Version=${{ steps.tag.outputs.tag }}" -o bin/asdl-agent-linux ./cmd/agent
+          GOOS=darwin GOARCH=amd64 go build -ldflags "-X main.Version=${{ steps.tag.outputs.tag }}" -o bin/asdl-agent-mac ./cmd/agent
+          GOOS=windows GOARCH=amd64 go build -ldflags "-X main.Version=${{ steps.tag.outputs.tag }}" -o bin/asdl-agent-windows.exe ./cmd/agent
           cd bin && sha256sum asdl-agent-linux asdl-agent-mac asdl-agent-windows.exe > checksums.txt
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          name: "Agent ${{ github.ref_name }}"
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: "Agent ${{ steps.tag.outputs.tag }}"
           body: |
-            ## ASDL Agent ${{ github.ref_name }}
+            ## ASDL Agent ${{ steps.tag.outputs.tag }}
 
             ### Changes
             ${{ github.event.head_commit.message }}
@@ -74,7 +83,7 @@ jobs:
         if: always()
         run: |
           echo "=== Release Summary ==="
-          echo "Tag:     ${{ github.ref_name }}"
+          echo "Tag:     ${{ steps.tag.outputs.tag }}"
           echo "Commit:  ${{ github.sha }}"
           echo "Message: ${{ github.event.head_commit.message }}"
           echo "Time:    $(date)"
