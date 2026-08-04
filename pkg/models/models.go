@@ -12,6 +12,7 @@ type NodeInfo struct {
     MemoryTotal  int64    `json:"memory_total"`
     DiskTotal    int64    `json:"disk_total"`
     Capabilities []string `json:"capabilities"`
+    Version string `json:"version"`
 }
 
 type Heartbeat struct {

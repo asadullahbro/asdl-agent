@@ -17,6 +17,8 @@ import (
     "github.com/asdl/agent/pkg/models"
 )
 
+var Version = "dev"
+
 func main() {
     configPath := flag.String("config", "config.yaml", "Path to config file")
     hubURL := flag.String("hub-url", "", "Hub URL (overrides config)")
@@ -36,7 +38,7 @@ func main() {
         cfg.VPNIP = *vpnIP
     }
 
-    log.Printf("Starting ASDL Agent")
+    log.Printf("Starting ASDL Agent %s", Version)
     log.Printf("Hub URL: %s", cfg.HubURL)
     log.Printf("VPN IP: %s", cfg.VPNIP)
     log.Printf("Work Dir: %s", cfg.WorkDir)
@@ -45,6 +47,7 @@ func main() {
     mon := monitor.NewMonitor()
     rnr := runner.NewRunner(cfg.WorkDir)
     cli := client.NewClient(cfg.HubURL, cfg.VPNIP)  // Pass both args
+
 
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
@@ -74,6 +77,8 @@ func run(ctx context.Context, cfg *config.Config,
         return err
     }
     info.VPNIP = cfg.VPNIP
+    
+    info.Version = Version
 
     if err := cli.Register(info); err != nil {
         return err
