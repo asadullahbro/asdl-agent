@@ -16,9 +16,10 @@ jobs:
       - name: Build binaries
         run: |
           mkdir -p bin
-          GOOS=linux GOARCH=amd64 go build -o bin/asdl-agent-linux ./cmd/agent
-          GOOS=darwin GOARCH=amd64 go build -o bin/asdl-agent-mac ./cmd/agent
-          GOOS=windows GOARCH=amd64 go build -o bin/asdl-agent-windows.exe ./cmd/agent
+          VERSION=${GITHUB_REF_NAME}
+          GOOS=linux GOARCH=amd64 go build -ldflags "-X main.Version=${VERSION}" -o bin/asdl-agent-linux ./cmd/agent
+          GOOS=darwin GOARCH=amd64 go build -ldflags "-X main.Version=${VERSION}" -o bin/asdl-agent-mac ./cmd/agent
+          GOOS=windows GOARCH=amd64 go build -ldflags "-X main.Version=${VERSION}" -o bin/asdl-agent-windows.exe ./cmd/agent
           cd bin && sha256sum asdl-agent-linux asdl-agent-mac asdl-agent-windows.exe > checksums.txt
       - name: Create Release
         uses: softprops/action-gh-release@v2
