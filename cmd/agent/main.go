@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"runtime"
 	"syscall"
+    "strings"
 	"time"
 
 	"github.com/asdl/agent/internal/client"
