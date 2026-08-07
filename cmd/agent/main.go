@@ -11,12 +11,14 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime"
+	"strings"
 	"syscall"
-    "strings"
 	"time"
 
 	"github.com/asdl/agent/internal/client"
 	"github.com/asdl/agent/internal/config"
+	"github.com/asdl/agent/internal/dashboard"
+	"github.com/asdl/agent/internal/enrollment"
 	"github.com/asdl/agent/internal/failover"
 	"github.com/asdl/agent/internal/monitor"
 	"github.com/asdl/agent/internal/runner"
@@ -26,14 +28,16 @@ import (
 var Version = "dev"
 
 func main() {
-	configPath := flag.String("config", "config.yaml", "Path to config file")
+	configPath := flag.String("config", config.DefaultConfigPath, "Path to config file")
 	hubURL := flag.String("hub-url", "", "Hub URL (overrides config)")
 	vpnIP := flag.String("vpn-ip", "", "VPN IP (overrides config)")
+	enroll := flag.Bool("enroll", false, "Run enrollment flow")
 	flag.Parse()
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		log.Printf("Config load failed: %v", err)
+		cfg = &config.Config{}
 	}
 
 	if *hubURL != "" {
@@ -43,16 +47,31 @@ func main() {
 		cfg.VPNIP = *vpnIP
 	}
 
+	// Run enrollment if flagged or not yet enrolled
+	if *enroll || !cfg.IsEnrolled() {
+		cfg, err = enrollment.Run(*configPath)
+		if err != nil {
+			log.Fatalf("Enrollment failed: %v", err)
+		}
+		// Wait for WireGuard to stabilize
+		log.Println("⏳ Waiting for WireGuard mesh to stabilize...")
+		time.Sleep(3 * time.Second)
+	}
+
 	log.Printf("Starting ASDL Agent %s", Version)
 	log.Printf("Hub URL: %s", cfg.HubURL)
 	log.Printf("VPN IP: %s", cfg.VPNIP)
+	log.Printf("Node ID: %s", cfg.NodeID)
 	log.Printf("Work Dir: %s", cfg.WorkDir)
 
-    // Initialize components
-    mon := monitor.NewMonitor()
-    rnr := runner.NewRunner(cfg.WorkDir)
-    cli := client.NewClient(cfg.HubURL, cfg.VPNIP)  // Pass both args
+	mon := monitor.NewMonitor()
+	rnr := runner.NewRunner(cfg.WorkDir)
+	cli := client.NewClient(cfg.HubURL, cfg.VPNIP)
 
+	// Initialize job history and dashboard
+	jobHistory := dashboard.NewRingBuffer(20)
+	dash := dashboard.New(mon, jobHistory, cfg.HubURL, cfg.NodeID, cfg.VPNIP, Version)
+	go dash.Start()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -65,7 +84,7 @@ func main() {
 		cancel()
 	}()
 
-	if err := run(ctx, cfg, mon, rnr, cli); err != nil {
+	if err := run(ctx, cfg, mon, rnr, cli, jobHistory); err != nil {
 		log.Fatalf("Agent failed: %v", err)
 	}
 
@@ -73,16 +92,16 @@ func main() {
 }
 
 func run(ctx context.Context, cfg *config.Config,
-	mon *monitor.Monitor, rnr *runner.Runner, cli *client.Client) error {
+	mon *monitor.Monitor, rnr *runner.Runner, cli *client.Client,
+	jobHistory *dashboard.RingBuffer) error {
 
-    // Get system info and register
-    info, err := mon.GetSystemInfo()
-    if err != nil {
-        return err
-    }
-    info.VPNIP = cfg.VPNIP
-    
-    info.Version = Version
+	// Get system info and register
+	info, err := mon.GetSystemInfo()
+	if err != nil {
+		return err
+	}
+	info.VPNIP = cfg.VPNIP
+	info.Version = Version
 
 	if err := cli.Register(info); err != nil {
 		return err
@@ -153,6 +172,16 @@ func run(ctx context.Context, cfg *config.Config,
 					}
 				}
 			}
+
+			// Push to job history before completing
+			jobHistory.Push(dashboard.JobEntry{
+				ID:        job.ID,
+				Type:      job.Type,
+				Status:    result.Status,
+				CreatedAt: job.CreatedAt,
+				EndedAt:   time.Now(),
+				ExitCode:  result.ExitCode,
+			})
 
 			if err := cli.CompleteJob(result); err != nil {
 				log.Printf("Failed to report job completion: %v", err)

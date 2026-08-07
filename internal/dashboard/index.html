@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ASDL Agent</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #000;
+    --surface: #0d0d0d;
+    --border: #222;
+    --text: #f0f0f0;
+    --muted: #555;
+    --accent: #f59e0b;
+    --green: #22c55e;
+    --red: #ef4444;
+    --blue: #3b82f6;
+    --yellow: #f59e0b;
+  }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: ui-monospace, 'JetBrains Mono', Menlo, monospace;
+    font-size: 13px;
+    min-height: 100vh;
+    padding: 24px;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 16px;
+    margin-bottom: 24px;
+  }
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .logo-mark {
+    width: 28px;
+    height: 28px;
+    background: var(--accent);
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #000;
+    font-weight: 700;
+    font-size: 14px;
+  }
+  .logo-text { font-size: 14px; font-weight: 600; color: var(--text); }
+  .logo-sub { font-size: 11px; color: var(--muted); margin-top: 1px; }
+  .status-pill {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .pulse {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--muted);
+    transition: background 0.3s;
+  }
+  .pulse.online { background: var(--green); animation: pulse 2s infinite; }
+  .pulse.offline { background: var(--red); }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+  }
+  .card-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .card-val {
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1;
+  }
+  .card-sub {
+    font-size: 10px;
+    color: var(--muted);
+    margin-top: 5px;
+  }
+  .card-accent { color: var(--accent); }
+  .section-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+  .bar-wrap {
+    background: var(--border);
+    border-radius: 3px;
+    height: 4px;
+    overflow: hidden;
+    margin-top: 8px;
+  }
+  .bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    background: var(--accent);
+    transition: width 0.4s ease;
+  }
+  .bar-fill.warn { background: var(--yellow); }
+  .bar-fill.danger { background: var(--red); }
+  .info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 24px;
+  }
+  .info-row {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .info-key { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+  .info-val { font-size: 12px; color: var(--text); word-break: break-all; }
+  .jobs-table { width: 100%; border-collapse: collapse; }
+  .jobs-table th {
+    text-align: left;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: var(--muted);
+    padding: 0 12px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .jobs-table td {
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--text);
+    vertical-align: middle;
+  }
+  .jobs-table tr:last-child td { border-bottom: none; }
+  .jobs-table tr:hover td { background: var(--surface); }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 20px;
+    font-size: 10px;
+    border: 1px solid transparent;
+  }
+  .badge-completed {
+    background: color-mix(in srgb, #22c55e 12%, transparent);
+    color: #22c55e;
+    border-color: color-mix(in srgb, #22c55e 20%, transparent);
+  }
+  .badge-running {
+    background: color-mix(in srgb, #3b82f6 12%, transparent);
+    color: #3b82f6;
+    border-color: color-mix(in srgb, #3b82f6 20%, transparent);
+  }
+  .badge-failed {
+    background: color-mix(in srgb, #ef4444 12%, transparent);
+    color: #ef4444;
+    border-color: color-mix(in srgb, #ef4444 20%, transparent);
+  }
+  .badge-pending {
+    background: color-mix(in srgb, #555 12%, transparent);
+    color: #555;
+    border-color: #222;
+  }
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 24px;
+  }
+  .empty {
+    padding: 32px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .last-updated {
+    font-size: 10px;
+    color: var(--muted);
+    text-align: right;
+    margin-top: 16px;
+  }
+  .uptime-val { color: var(--accent); }
+  @media (max-width: 600px) {
+    body { padding: 12px; }
+    .info-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-mark">A</div>
+    <div>
+      <div class="logo-text">ASDL Agent</div>
+      <div class="logo-sub" id="version">loading...</div>
+    </div>
+  </div>
+  <div class="status-pill">
+    <div class="pulse" id="pulse"></div>
+    <span id="status-text">connecting</span>
+  </div>
+</header>
+
+<!-- Node info -->
+<div class="section-title">Node</div>
+<div class="info-grid" id="info-grid">
+  <div class="info-row"><span class="info-key">Hostname</span><span class="info-val" id="hostname">—</span></div>
+  <div class="info-row"><span class="info-key">VPN IP</span><span class="info-val" id="vpn-ip">—</span></div>
+  <div class="info-row"><span class="info-key">Node ID</span><span class="info-val" id="node-id">—</span></div>
+  <div class="info-row"><span class="info-key">Hub</span><span class="info-val" id="hub-url">—</span></div>
+  <div class="info-row"><span class="info-key">Uptime</span><span class="info-val uptime-val" id="uptime">—</span></div>
+  <div class="info-row"><span class="info-key">Load avg</span><span class="info-val" id="load">—</span></div>
+</div>
+
+<!-- Resources -->
+<div class="section-title">Resources</div>
+<div class="grid" id="resource-grid">
+  <div class="card">
+    <div class="card-label">CPU</div>
+    <div class="card-val card-accent" id="cpu-val">—</div>
+    <div class="card-sub">utilization</div>
+    <div class="bar-wrap"><div class="bar-fill" id="cpu-bar" style="width:0%"></div></div>
+  </div>
+  <div class="card">
+    <div class="card-label">Memory</div>
+    <div class="card-val" id="mem-val">—</div>
+    <div class="card-sub" id="mem-sub">—</div>
+    <div class="bar-wrap"><div class="bar-fill" id="mem-bar" style="width:0%"></div></div>
+  </div>
+  <div class="card">
+    <div class="card-label">Disk</div>
+    <div class="card-val" id="disk-val">—</div>
+    <div class="card-sub" id="disk-sub">—</div>
+    <div class="bar-wrap"><div class="bar-fill" id="disk-bar" style="width:0%"></div></div>
+  </div>
+  <div class="card">
+    <div class="card-label">Ping latency</div>
+    <div class="card-val" id="ping-val">—</div>
+    <div class="card-sub">to hub</div>
+  </div>
+</div>
+
+<!-- Jobs -->
+<div class="section-title">Recent jobs</div>
+<div class="panel">
+  <table class="jobs-table">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Type</th>
+        <th>Status</th>
+        <th>Exit</th>
+        <th>Time</th>
+      </tr>
+    </thead>
+    <tbody id="jobs-body">
+      <tr><td colspan="5" class="empty">No jobs yet</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="last-updated">Last updated: <span id="last-updated">—</span></div>
+
+<script>
+function fmt(bytes) {
+  if (bytes === 0) return '0 B';
+  const k = 1024, sizes = ['B','KB','MB','GB','TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return (bytes / Math.pow(k, i)).toFixed(1) + ' ' + sizes[i];
+}
+
+function fmtUptime(seconds) {
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  if (d > 0) return `${d}d ${h}h ${m}m`;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function barClass(pct) {
+  if (pct > 90) return 'bar-fill danger';
+  if (pct > 75) return 'bar-fill warn';
+  return 'bar-fill';
+}
+
+function badgeClass(status) {
+  const map = { completed: 'badge-completed', running: 'badge-running', failed: 'badge-failed', pending: 'badge-pending' };
+  return 'badge ' + (map[status] || 'badge-pending');
+}
+
+function timeAgo(ts) {
+  const diff = Math.floor((Date.now() / 1000) - new Date(ts).getTime() / 1000);
+  if (diff < 60) return diff + 's ago';
+  if (diff < 3600) return Math.floor(diff/60) + 'm ago';
+  if (diff < 86400) return Math.floor(diff/3600) + 'h ago';
+  return Math.floor(diff/86400) + 'd ago';
+}
+
+async function refresh() {
+  try {
+    const res = await fetch('/api/status');
+    if (!res.ok) throw new Error('fetch failed');
+    const d = await res.json();
+
+    // Header
+    document.getElementById('version').textContent = 'v' + d.version;
+    document.getElementById('pulse').className = 'pulse online';
+    document.getElementById('status-text').textContent = 'online';
+
+    // Node info
+    document.getElementById('hostname').textContent = d.hostname || '—';
+    document.getElementById('vpn-ip').textContent = d.vpn_ip || '—';
+    document.getElementById('node-id').textContent = (d.node_id || '—').slice(0, 16) + '...';
+    document.getElementById('hub-url').textContent = d.hub_url || '—';
+    document.getElementById('uptime').textContent = fmtUptime(d.uptime || 0);
+    document.getElementById('load').textContent =
+      `${(d.load_avg_1||0).toFixed(2)} ${(d.load_avg_5||0).toFixed(2)} ${(d.load_avg_15||0).toFixed(2)}`;
+
+    // CPU
+    const cpu = Math.round(d.cpu_percent || 0);
+    document.getElementById('cpu-val').textContent = cpu + '%';
+    const cpuBar = document.getElementById('cpu-bar');
+    cpuBar.style.width = cpu + '%';
+    cpuBar.className = barClass(cpu);
+
+    // Memory
+    const memPct = d.memory_total > 0 ? Math.round(d.memory_used / d.memory_total * 100) : 0;
+    document.getElementById('mem-val').textContent = memPct + '%';
+    document.getElementById('mem-sub').textContent = fmt(d.memory_used) + ' / ' + fmt(d.memory_total);
+    const memBar = document.getElementById('mem-bar');
+    memBar.style.width = memPct + '%';
+    memBar.className = barClass(memPct);
+
+    // Disk
+    const diskPct = d.disk_total > 0 ? Math.round(d.disk_used / d.disk_total * 100) : 0;
+    document.getElementById('disk-val').textContent = diskPct + '%';
+    document.getElementById('disk-sub').textContent = fmt(d.disk_used) + ' / ' + fmt(d.disk_total);
+    const diskBar = document.getElementById('disk-bar');
+    diskBar.style.width = diskPct + '%';
+    diskBar.className = barClass(diskPct);
+
+    // Ping
+    const ping = d.ping_latency || 0;
+    document.getElementById('ping-val').textContent = ping > 0 ? ping.toFixed(1) + 'ms' : '—';
+
+    // Jobs
+    const tbody = document.getElementById('jobs-body');
+    if (!d.jobs || d.jobs.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="empty">No jobs yet</td></tr>';
+    } else {
+      tbody.innerHTML = d.jobs.map(j => `
+        <tr>
+          <td style="color:var(--muted)">${j.id.slice(0,8)}...</td>
+          <td>${j.type}</td>
+          <td><span class="${badgeClass(j.status)}">${j.status}</span></td>
+          <td style="color:${j.exit_code === 0 ? 'var(--green)' : 'var(--red)'}">${j.exit_code}</td>
+          <td style="color:var(--muted)">${timeAgo(j.created_at)}</td>
+        </tr>
+      `).join('');
+    }
+
+    document.getElementById('last-updated').textContent = new Date().toLocaleTimeString();
+
+  } catch (e) {
+    document.getElementById('pulse').className = 'pulse offline';
+    document.getElementById('status-text').textContent = 'offline';
+  }
+}
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>
