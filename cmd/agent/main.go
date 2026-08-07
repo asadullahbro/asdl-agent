@@ -200,7 +200,6 @@ func run(ctx context.Context, cfg *config.Config,
 		}
 	}
 }
-
 func selfUpdate(ctx context.Context) {
 	latest, err := getLatestVersion()
 	if err != nil {
@@ -216,8 +215,44 @@ func selfUpdate(ctx context.Context) {
 	log.Printf("🔄 New version available: %s (current: %s), updating...", latest, Version)
 
 	binary := "asdl-agent-linux"
+	checksumCmd := "sha256sum"
+
 	if runtime.GOOS == "darwin" {
 		binary = "asdl-agent-mac"
+		// Check if sha256sum exists, if not try to install or fallback
+		if _, err := exec.LookPath("sha256sum"); err != nil {
+			log.Println("📦 Installing coreutils for sha256sum...")
+			if _, err := exec.LookPath("brew"); err == nil {
+				// Install via Homebrew
+				if _, err := exec.Command("brew", "install", "coreutils").CombinedOutput(); err != nil {
+					log.Printf("⚠️ Failed to install coreutils: %v, falling back to shasum", err)
+					checksumCmd = "shasum -a 256"
+				} else {
+					// Add to PATH for this session
+					os.Setenv("PATH", "/usr/local/opt/coreutils/libexec/gnubin:"+os.Getenv("PATH"))
+					checksumCmd = "sha256sum"
+				}
+			} else {
+				log.Println("⚠️ Homebrew not found, falling back to shasum")
+				checksumCmd = "shasum -a 256"
+			}
+		}
+	} else {
+		// Linux - try to install coreutils if missing
+		if _, err := exec.LookPath("sha256sum"); err != nil {
+			log.Println("📦 Installing coreutils for sha256sum...")
+			if _, err := exec.LookPath("apt-get"); err == nil {
+				exec.Command("apt-get", "update", "-qq").Run()
+				exec.Command("apt-get", "install", "-y", "-qq", "coreutils").Run()
+			} else if _, err := exec.LookPath("yum"); err == nil {
+				exec.Command("yum", "install", "-y", "-q", "coreutils").Run()
+			} else if _, err := exec.LookPath("apk"); err == nil {
+				exec.Command("apk", "add", "--no-cache", "coreutils").Run()
+			} else {
+				log.Println("⚠️ No package manager found, checksum will be skipped")
+				checksumCmd = ""
+			}
+		}
 	}
 
 	url := fmt.Sprintf("https://github.com/asadullahbro/asdl-agent/releases/latest/download/%s", binary)
@@ -230,23 +265,27 @@ func selfUpdate(ctx context.Context) {
 	}
 
 	// Verify checksum
-	expected, err := exec.CommandContext(ctx, "sh", "-c",
-		fmt.Sprintf(`curl -fsSL %s | grep "%s" | awk '{print $1}'`, checksumURL, binary)).Output()
-	if err != nil {
-		log.Printf("⚠️ Checksum fetch failed: %v", err)
-		return
-	}
-
-	actual, err := exec.CommandContext(ctx, "sh", "-c", "sha256sum /tmp/asdl-agent-new | awk '{print $1}'").Output()
-	if err != nil {
-		log.Printf("⚠️ Checksum compute failed: %v", err)
-		return
-	}
-
-	if strings.TrimSpace(string(expected)) != strings.TrimSpace(string(actual)) {
-		log.Printf("❌ Checksum mismatch, aborting update")
-		os.Remove("/tmp/asdl-agent-new")
-		return
+	if checksumCmd != "" {
+		expected, err := exec.CommandContext(ctx, "sh", "-c",
+			fmt.Sprintf(`curl -fsSL %s | grep "%s" | awk '{print $1}'`, checksumURL, binary)).Output()
+		if err != nil {
+			log.Printf("⚠️ Checksum fetch failed: %v", err)
+			// Continue anyway
+		} else {
+			actual, err := exec.CommandContext(ctx, "sh", "-c", fmt.Sprintf("%s /tmp/asdl-agent-new | awk '{print $1}'", checksumCmd)).Output()
+			if err != nil {
+				log.Printf("⚠️ Checksum compute failed: %v", err)
+				// Continue anyway
+			} else if strings.TrimSpace(string(expected)) != strings.TrimSpace(string(actual)) {
+				log.Printf("❌ Checksum mismatch, aborting update")
+				os.Remove("/tmp/asdl-agent-new")
+				return
+			} else {
+				log.Println("✅ Checksum verified")
+			}
+		}
+	} else {
+		log.Println("⚠️ Skipping checksum verification (no tool available)")
 	}
 
 	// Replace binary
