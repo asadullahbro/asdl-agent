@@ -144,23 +144,43 @@ func (m *Monitor) detectCapabilities() []string {
 }
 
 func (m *Monitor) getUptime() int64 {
-	// Linux: read /proc/uptime
-	data, err := os.ReadFile("/proc/uptime")
-	if err != nil {
-		return 0
-	}
+    if runtime.GOOS == "darwin" {
+        out, err := exec.Command("sysctl", "-n", "kern.boottime").Output()
+        if err != nil {
+            return 0
+        }
+        // output: { sec = 1234567890, usec = 0 } Mon Jan ...
+        s := string(out)
+        idx := strings.Index(s, "sec = ")
+        if idx == -1 {
+            return 0
+        }
+        s = s[idx+6:]
+        end := strings.IndexAny(s, ", }")
+        if end == -1 {
+            return 0
+        }
+        bootSec, err := strconv.ParseInt(strings.TrimSpace(s[:end]), 10, 64)
+        if err != nil {
+            return 0
+        }
+        return time.Now().Unix() - bootSec
+    }
 
-	parts := strings.Fields(string(data))
-	if len(parts) == 0 {
-		return 0
-	}
-
-	uptime, err := strconv.ParseFloat(parts[0], 64)
-	if err != nil {
-		return 0
-	}
-
-	return int64(uptime)
+    // Linux
+    data, err := os.ReadFile("/proc/uptime")
+    if err != nil {
+        return 0
+    }
+    parts := strings.Fields(string(data))
+    if len(parts) == 0 {
+        return 0
+    }
+    uptime, err := strconv.ParseFloat(parts[0], 64)
+    if err != nil {
+        return 0
+    }
+    return int64(uptime)
 }
 
 func (m *Monitor) getPingLatency(hubIP string) float64 {
