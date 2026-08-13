@@ -2,7 +2,6 @@ package monitor
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"runtime"
@@ -60,6 +59,51 @@ func (m *Monitor) GetSystemInfo() (*models.NodeInfo, error) {
 		Capabilities: m.detectCapabilities(),
 	}, nil
 }
+func (m *Monitor) getCPUPercent() float64 {
+	if runtime.GOOS == "darwin" {
+		out, err := exec.Command("sh", "-c", "top -l 1 -n 0 | grep 'CPU usage'").Output()
+		if err != nil {
+			return 0
+		}
+		// output: CPU usage: 12.34% user, 5.67% sys, 81.98% idle
+		s := string(out)
+		idx := strings.Index(s, "CPU usage: ")
+		if idx == -1 {
+			return 0
+		}
+		s = s[idx+11:]
+		end := strings.Index(s, "% user")
+		if end == -1 {
+			return 0
+		}
+		user, err := strconv.ParseFloat(strings.TrimSpace(s[:end]), 64)
+		if err != nil {
+			return 0
+		}
+		// Also grab sys
+		sysIdx := strings.Index(s, "% user, ")
+		if sysIdx == -1 {
+			return user
+		}
+		s = s[sysIdx+8:]
+		end = strings.Index(s, "% sys")
+		if end == -1 {
+			return user
+		}
+		sys, err := strconv.ParseFloat(strings.TrimSpace(s[:end]), 64)
+		if err != nil {
+			return user
+		}
+		return user + sys
+	}
+
+	// Linux - gopsutil works fine
+	cpuPercents, err := cpu.Percent(100*time.Millisecond, false)
+	if err == nil && len(cpuPercents) > 0 {
+		return cpuPercents[0]
+	}
+	return 0
+}
 
 // GetHeartbeat returns current resource usage plus link-quality metrics
 // (ping latency to the Hub and WiFi signal strength, if applicable).
@@ -73,14 +117,6 @@ func (m *Monitor) GetHeartbeat() (*models.Heartbeat, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get disk info: %w", err)
 	}
-
-	// Try to get CPU percent, fallback to 0 if it fails
-	var cpuPercent float64 = 0
-	cpuPercents, err := cpu.Percent(100*time.Millisecond, false)
-	log.Printf("CPU sample: %v, err: %v", cpuPercents, err)
-	if err == nil && len(cpuPercents) > 0 {
-		cpuPercent = cpuPercents[0]
-	}
 	// If err != nil, cpuPercent stays 0
 
 	loadAvg, err := load.Avg()
@@ -90,6 +126,7 @@ func (m *Monitor) GetHeartbeat() (*models.Heartbeat, error) {
 
 	pingLatency := m.getPingLatency(m.hubIP)
 	wifiSignal := m.getWiFiSignal()
+	cpuPercent := m.getCPUPercent()
 
 	return &models.Heartbeat{
 		CPUPercent:  cpuPercent,
