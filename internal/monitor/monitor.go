@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"runtime"
@@ -76,6 +77,7 @@ func (m *Monitor) GetHeartbeat() (*models.Heartbeat, error) {
 	// Try to get CPU percent, fallback to 0 if it fails
 	var cpuPercent float64 = 0
 	cpuPercents, err := cpu.Percent(100*time.Millisecond, false)
+	log.Printf("CPU sample: %v, err: %v", cpuPercents, err)
 	if err == nil && len(cpuPercents) > 0 {
 		cpuPercent = cpuPercents[0]
 	}
@@ -144,47 +146,46 @@ func (m *Monitor) detectCapabilities() []string {
 }
 
 func (m *Monitor) getUptime() int64 {
-    if runtime.GOOS == "darwin" {
-        out, err := exec.Command("sysctl", "-n", "kern.boottime").Output()
-        if err != nil {
-            return 0
-        }
-        // output: { sec = 1234567890, usec = 0 } Mon Jan ...
-        s := string(out)
-        idx := strings.Index(s, "sec = ")
-        if idx == -1 {
-            return 0
-        }
-        s = s[idx+6:]
-        end := strings.IndexAny(s, ", }")
-        if end == -1 {
-            return 0
-        }
-        bootSec, err := strconv.ParseInt(strings.TrimSpace(s[:end]), 10, 64)
-        if err != nil {
-            return 0
-        }
-        return time.Now().Unix() - bootSec
-    }
+	if runtime.GOOS == "darwin" {
+		out, err := exec.Command("sysctl", "-n", "kern.boottime").Output()
+		if err != nil {
+			return 0
+		}
+		// output: { sec = 1234567890, usec = 0 } Mon Jan ...
+		s := string(out)
+		idx := strings.Index(s, "sec = ")
+		if idx == -1 {
+			return 0
+		}
+		s = s[idx+6:]
+		end := strings.IndexAny(s, ", }")
+		if end == -1 {
+			return 0
+		}
+		bootSec, err := strconv.ParseInt(strings.TrimSpace(s[:end]), 10, 64)
+		if err != nil {
+			return 0
+		}
+		return time.Now().Unix() - bootSec
+	}
 
-    // Linux
-    data, err := os.ReadFile("/proc/uptime")
-    if err != nil {
-        return 0
-    }
-    parts := strings.Fields(string(data))
-    if len(parts) == 0 {
-        return 0
-    }
-    uptime, err := strconv.ParseFloat(parts[0], 64)
-    if err != nil {
-        return 0
-    }
-    return int64(uptime)
+	// Linux
+	data, err := os.ReadFile("/proc/uptime")
+	if err != nil {
+		return 0
+	}
+	parts := strings.Fields(string(data))
+	if len(parts) == 0 {
+		return 0
+	}
+	uptime, err := strconv.ParseFloat(parts[0], 64)
+	if err != nil {
+		return 0
+	}
+	return int64(uptime)
 }
 
 func (m *Monitor) getPingLatency(hubIP string) float64 {
-	// Ping the Hub (10.100.0.1)
 	cmd := exec.Command("ping", "-c", "3", "-W", "2", hubIP)
 	output, err := cmd.Output()
 	if err != nil {
