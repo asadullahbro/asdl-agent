@@ -59,31 +59,3 @@ jobs:
             bin/checksums.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  deploy:
-    runs-on: [self-hosted, Linux, X64]
-    needs: release
-    steps:
-      - name: Dispatch agent update to all nodes
-        run: |
-          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST http://localhost:8080/api/v1/agents/deploy \
-            -H "Authorization: Bearer ${{ secrets.ASDL_TOKEN }}")
-          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-          BODY=$(echo "$RESPONSE" | sed '$d')
-          echo "HTTP Code: $HTTP_CODE"
-          echo "Response: $BODY"
-          if [ "$HTTP_CODE" != "200" ]; then
-            echo "Agent deploy dispatch failed"
-            echo "$BODY"
-            exit 1
-          fi
-          DISPATCHED=$(echo "$BODY" | jq -r '.dispatched // 0')
-          TOTAL=$(echo "$BODY" | jq -r '.total // 0')
-          echo "Agent update dispatched to $DISPATCHED/$TOTAL nodes"
-      - name: Summary
-        if: always()
-        run: |
-          echo "=== Release Summary ==="
-          echo "Tag:     ${{ steps.tag.outputs.tag }}"
-          echo "Commit:  ${{ github.sha }}"
-          echo "Message: ${{ github.event.head_commit.message }}"
-          echo "Time:    $(date)"
