@@ -75,7 +75,7 @@ func (m *Monitor) GetHeartbeat() (*models.Heartbeat, error) {
 
 	// Try to get CPU percent, fallback to 0 if it fails
 	var cpuPercent float64 = 0
-	cpuPercents, err := cpu.Percent(0, false)
+	cpuPercents, err := cpu.Percent(100*time.Millisecond, false)
 	if err == nil && len(cpuPercents) > 0 {
 		cpuPercent = cpuPercents[0]
 	}
