@@ -6,11 +6,13 @@ import (
 	"net/http"
 	"sync"
 	"time"
+	"log"
 
 	"github.com/asdl/agent/internal/monitor"
 )
 
 
+//go:embed index.html
 var htmlFile embed.FS
 
 type JobEntry struct {
@@ -73,7 +75,11 @@ func (d *Dashboard) Start() {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		data, _ := htmlFile.ReadFile("index.html")
+		data, err := htmlFile.ReadFile("index.html")
+		if err != nil {
+			http.Error(w, "dashboard not found", 500)
+			return
+		}
 		w.Header().Set("Content-Type", "text/html")
 		w.Write(data)
 	})
@@ -111,5 +117,7 @@ func (d *Dashboard) Start() {
 		})
 	})
 
-	http.ListenAndServe(":8081", mux)
+	if err := http.ListenAndServe(":8081", mux); err != nil {
+    log.Printf("Dashboard failed to start: %v", err)
+}
 }

@@ -64,7 +64,8 @@ func main() {
 	log.Printf("Node ID: %s", cfg.NodeID)
 	log.Printf("Work Dir: %s", cfg.WorkDir)
 
-	mon := monitor.NewMonitor()
+	hubWgIP := deriveHubIP(cfg.VPNIP)
+	mon := monitor.NewMonitor(hubWgIP)
 	rnr := runner.NewRunner(cfg.WorkDir)
 	cli := client.NewClient(cfg.HubURL, cfg.VPNIP)
 
@@ -316,4 +317,14 @@ func getLatestVersion() (string, error) {
 	}
 
 	return release.TagName, nil
+}
+
+func deriveHubIP(vpnIP string) string {
+	parts := strings.Split(vpnIP, ".")
+	if len(parts) != 4 {
+		return "10.100.0.1"
+	}
+	// Replace last octet with 1
+	parts[3] = "1"
+	return strings.Join(parts, ".")
 }

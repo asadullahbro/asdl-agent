@@ -19,14 +19,15 @@ import (
 
 type Monitor struct {
 	lastCPU time.Time
+	hubIP   string
 }
 
-func NewMonitor() *Monitor {
+func NewMonitor(hubIP string) *Monitor {
 	return &Monitor{
 		lastCPU: time.Now(),
+		hubIP:   hubIP,
 	}
 }
-
 func (m *Monitor) GetSystemInfo() (*models.NodeInfo, error) {
 	hostname, err := os.Hostname()
 	if err != nil {
@@ -85,7 +86,7 @@ func (m *Monitor) GetHeartbeat() (*models.Heartbeat, error) {
 		loadAvg = &load.AvgStat{}
 	}
 
-	pingLatency := m.getPingLatency()
+	pingLatency := m.getPingLatency(m.hubIP)
 	wifiSignal := m.getWiFiSignal()
 
 	return &models.Heartbeat{
@@ -162,9 +163,9 @@ func (m *Monitor) getUptime() int64 {
 	return int64(uptime)
 }
 
-func (m *Monitor) getPingLatency() float64 {
+func (m *Monitor) getPingLatency(hubIP string) float64 {
 	// Ping the Hub (10.100.0.1)
-	cmd := exec.Command("ping", "-c", "3", "-W", "1", "10.100.0.1")
+	cmd := exec.Command("ping", "-c", "3", "-W", "2", hubIP)
 	output, err := cmd.Output()
 	if err != nil {
 		return 999.0 // High latency means unreachable
