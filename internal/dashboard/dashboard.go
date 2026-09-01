@@ -3,14 +3,14 @@ package dashboard
 import (
 	"embed"
 	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
 	"sync"
 	"time"
-	"log"
 
 	"github.com/asdl/agent/internal/monitor"
 )
-
 
 //go:embed index.html
 var htmlFile embed.FS
@@ -58,9 +58,10 @@ type Dashboard struct {
 	nodeID  string
 	vpnIP   string
 	version string
+	port    int
 }
 
-func New(mon *monitor.Monitor, jobs *RingBuffer, hubURL, nodeID, vpnIP, version string) *Dashboard {
+func New(mon *monitor.Monitor, jobs *RingBuffer, hubURL, nodeID, vpnIP, version string, port int) *Dashboard {
 	return &Dashboard{
 		mon:     mon,
 		jobs:    jobs,
@@ -68,6 +69,7 @@ func New(mon *monitor.Monitor, jobs *RingBuffer, hubURL, nodeID, vpnIP, version 
 		nodeID:  nodeID,
 		vpnIP:   vpnIP,
 		version: version,
+		port:    port,
 	}
 }
 
@@ -117,7 +119,9 @@ func (d *Dashboard) Start() {
 		})
 	})
 
-	if err := http.ListenAndServe(":8081", mux); err != nil {
-    log.Printf("Dashboard failed to start: %v", err)
-}
+	addr := fmt.Sprintf(":%d", d.port)
+	log.Printf("Dashboard listening on %s", addr)
+	if err := http.ListenAndServe(addr, mux); err != nil {
+		log.Printf("Dashboard failed to start: %v", err)
+	}
 }

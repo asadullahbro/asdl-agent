@@ -17,9 +17,12 @@ type Config struct {
 	Interval time.Duration `yaml:"interval"`
 	WorkDir  string        `yaml:"work_dir"`
 	MaxJobs  int           `yaml:"max_jobs"`
-	Enrolled bool          `yaml:"enrolled"` // Added Enrolled field
+	Enrolled bool          `yaml:"enrolled"`
+	Dashboard DashboardConfig `yaml:"dashboard"`
 }
-
+type DashboardConfig struct {
+    Port int `yaml:"port"`
+}
 const DefaultConfigPath = "/etc/asdl/agent.conf"
 
 func Load(path string) (*Config, error) {

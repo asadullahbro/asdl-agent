@@ -71,7 +71,7 @@ func main() {
 
 	// Initialize job history and dashboard
 	jobHistory := dashboard.NewRingBuffer(20)
-	dash := dashboard.New(mon, jobHistory, cfg.HubURL, cfg.NodeID, cfg.VPNIP, Version)
+	dash := dashboard.New(mon, jobHistory, cfg.HubURL, cfg.NodeID, cfg.VPNIP, Version, cfg.Dashboard.Port)
 	go dash.Start()
 
 	ctx, cancel := context.WithCancel(context.Background())
