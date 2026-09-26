@@ -30,7 +30,7 @@ machine needs no public IP or open ports.
 | **Runs jobs** | Checks for work every 5 seconds: deploying and replacing containers, taking over apps from a failed node, removing stale copies, pulling images. |
 | **Keeps secrets out of logs** | Environment values arrive separately from commands and are never written to job logs. |
 | **Updates itself** | Checks for a new release every 5 minutes, verifies its checksum and restarts into it. Can be turned off per node (the Hub can still push an update). |
-| **Local dashboard** | Shows the node's resources, recent jobs, its version and update status at `http://localhost:<port>`. |
+| **Local dashboard** | At `http://localhost:<port>` on the node: its apps and their logs, the connection to the Hub, updates (Check now / Install now / automatic on-off), maintenance mode, resources and recent jobs. |
 
 ## Install
 
