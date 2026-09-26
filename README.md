@@ -23,7 +23,7 @@ machine needs no public IP or open ports.
 
 ## What it does
 
-| Job | Details |
+| Feature | What it does |
 |---|---|
 | **Joins the mesh** | Connects to the Hub over WireGuard and registers the machine as a node. |
 | **Reports health** | Sends a heartbeat every 30 seconds with CPU, memory, disk and network latency, which the Hub uses to pick where apps run. |
