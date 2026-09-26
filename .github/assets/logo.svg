@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="ASDL Agent">
+  <rect x="0.5" y="0.5" width="63" height="63" rx="14" fill="#0f1418" stroke="#2b3238"/>
+  <g opacity="0.45">
+    <path d="M32 15.5 L13 48.5 L51 48.5 Z" fill="none" stroke="#9a6413" stroke-width="5" stroke-linejoin="round"/>
+    <circle cx="13" cy="48.5" r="6" fill="#9a6413"/>
+    <circle cx="51" cy="48.5" r="6" fill="#9a6413"/>
+  </g>
+  <circle cx="32" cy="15.5" r="11.5" fill="none" stroke="#f29a00" stroke-width="2.5" opacity="0.5"/>
+  <circle cx="32" cy="15.5" r="7.5" fill="#f29a00"/>
+</svg>
