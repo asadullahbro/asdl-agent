@@ -86,7 +86,7 @@ docker run -d \
     --name %s \
     --restart unless-stopped \
     %s %s %s \
-    %s:latest
+    %s
 echo "✅ Container started"
 docker ps --filter "name=%s"`,
             p.ContainerName,
@@ -97,17 +97,17 @@ docker ps --filter "name=%s"`,
             ports,
             volumes,
             envVars,
-            p.Image,
+            models.ImageRef(p.Image),
             p.ContainerName,
         )
 
     case "image_pull":
         return fmt.Sprintf(`set -e
 echo "📥 Pulling image: %s"
-docker pull %s:latest
+docker pull %s
 echo "✅ Image pulled successfully"`,
             p.Image,
-            p.Repository,
+            models.ImageRef(p.Repository),
         )
 
     default:

@@ -1,6 +1,9 @@
 package models
 
-import "time"
+import (
+    "strings"
+    "time"
+)
 
 type NodeInfo struct {
     ID           string   `json:"id,omitempty"`
@@ -75,3 +78,17 @@ type JobResult struct {
     Duration int64  `json:"duration"`
 }
 
+
+// ImageRef returns image with ":latest" added only when it has no tag or
+// digest. The hub stores images from CI with their tag already attached
+// ("ghcr.io/o/app:<sha>"); a registry host's port ("host:5000/app") is not a tag.
+func ImageRef(image string) string {
+    if strings.Contains(image, "@") {
+        return image
+    }
+    lastSlash := strings.LastIndex(image, "/")
+    if strings.Contains(image[lastSlash+1:], ":") {
+        return image
+    }
+    return image + ":latest"
+}
