@@ -90,6 +90,31 @@
   .toggle input:checked + .track::after { transform: translateX(14px); background: var(--accent); }
   .toggle input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
   .toggle input:disabled + .track { opacity: .5; }
+  .btn { font: inherit; font-size: 11px; padding: 5px 10px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer; }
+  .btn:hover { border-color: #444; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .btn-accent { background: var(--accent); border-color: var(--accent); color: #000; font-weight: 600; }
+  .btn-row { display: flex; gap: 8px; align-items: center; }
+  .panel-box { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; margin-bottom: 24px; }
+  .panel-box.warn { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+  .panel-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .panel-head .grow { flex: 1; min-width: 220px; font-size: 12px; line-height: 1.5; }
+  .muted { color: #888; }
+  .kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-top: 10px; font-size: 11px; }
+  .kv dt { color: var(--muted); margin-bottom: 2px; }
+  .kv dd { color: var(--text); }
+  .kv dd.bad { color: var(--yellow); }
+  .ok-text { color: var(--green); }
+  .warn-text { color: var(--yellow); }
+  .tag { display: inline-block; font-size: 9px; padding: 1px 5px; border-radius: 4px; background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); margin-left: 6px; vertical-align: 1px; }
+  .state-running { color: var(--green); }
+  .state-other { color: var(--red); }
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.65); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 10; }
+  .modal[hidden] { display: none; }
+  .modal-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; width: 100%; max-width: 960px; max-height: 85vh; display: flex; flex-direction: column; }
+  .modal-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 12px; }
+  .modal-body { overflow: auto; padding: 12px 14px; }
+  .modal-body pre { font-size: 11px; color: #bbb; white-space: pre-wrap; word-break: break-all; }
   .spin { display: inline-block; width: 11px; height: 11px; border: 2px solid var(--accent); border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; vertical-align: -1px; margin-right: 6px; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .grid {
@@ -264,6 +289,10 @@
 <div class="updates" id="updates">
   <div class="updates-row">
     <div class="updates-status" id="updates-status">Checking for updates…</div>
+    <div class="btn-row">
+      <button class="btn btn-accent" id="install-now" hidden>Install now</button>
+      <button class="btn" id="check-now">Check now</button>
+    </div>
     <label class="toggle" title="Let this agent install new releases by itself">
       <input type="checkbox" id="auto-update" checked />
       <span class="track"></span>
@@ -278,6 +307,20 @@
   <div class="updates-error" id="updates-error" hidden></div>
 </div>
 
+<!-- Maintenance -->
+<div class="panel-box" id="maint-box">
+  <div class="panel-head">
+    <div class="grow" id="maint-status">Maintenance mode: checking with the Hub…</div>
+    <button class="btn" id="maint-toggle" disabled>Start maintenance</button>
+  </div>
+  <div class="updates-note">
+    Before rebooting or working on this machine: the Hub moves this node's apps to other nodes (each new copy
+    starts before the old one is removed) and sends it no new apps until maintenance ends.
+  </div>
+  <div class="updates-note" id="maint-result" hidden></div>
+  <div class="updates-error" id="maint-error" hidden></div>
+</div>
+
 <!-- Node info -->
 <div class="section-title">Node</div>
 <div class="info-grid" id="info-grid">
@@ -287,6 +330,18 @@
   <div class="info-row"><span class="info-key">Hub</span><span class="info-val" id="hub-url">—</span></div>
   <div class="info-row"><span class="info-key">Uptime</span><span class="info-val uptime-val" id="uptime">—</span></div>
   <div class="info-row"><span class="info-key">Load avg</span><span class="info-val" id="load">—</span></div>
+</div>
+
+<!-- Connection -->
+<div class="section-title">Connection to Hub</div>
+<div class="panel-box" id="conn-box">
+  <div id="conn-verdict" style="font-size:12px">—</div>
+  <dl class="kv">
+    <div><dt>Last successful heartbeat</dt><dd id="conn-hb">—</dd></div>
+    <div><dt>WireGuard handshake</dt><dd id="conn-wg">—</dd></div>
+    <div><dt>Ping to Hub</dt><dd id="conn-ping">—</dd></div>
+    <div><dt>Last error</dt><dd id="conn-err">none</dd></div>
+  </dl>
 </div>
 
 <!-- Resources -->
@@ -314,6 +369,29 @@
     <div class="card-label">Ping latency</div>
     <div class="card-val" id="ping-val">—</div>
     <div class="card-sub">to hub</div>
+  </div>
+</div>
+
+<!-- Apps -->
+<div class="section-title">Apps on this node</div>
+<div class="panel">
+  <table class="jobs-table">
+    <thead>
+      <tr><th>Name</th><th>Image</th><th>State</th><th>Ports</th><th></th></tr>
+    </thead>
+    <tbody id="apps-body">
+      <tr><td colspan="5" class="empty">Loading…</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="modal" id="logs-modal" hidden>
+  <div class="modal-card">
+    <div class="modal-head">
+      <span id="logs-title">Logs</span>
+      <span class="btn-row"><button class="btn" id="logs-refresh">Refresh</button><button class="btn" id="logs-close">Close</button></span>
+    </div>
+    <div class="modal-body"><pre id="logs-text"></pre></div>
   </div>
 </div>
 
@@ -385,6 +463,9 @@ async function refresh() {
     // Header
     document.getElementById('version').textContent = d.version;
     renderUpdates(d);
+    renderMaintenance(d.connection || {});
+    renderConnection(d);
+    renderApps(d.containers);
     document.getElementById('pulse').className = 'pulse online';
     document.getElementById('status-text').textContent = 'online';
 
@@ -481,7 +562,7 @@ function renderUpdates(d) {
     html = `⬆ <b><code>${esc(u.latest)}</code> is available</b> <span class="muted">— this node runs <code>${esc(d.version)}</code>.</span> ` +
       (u.auto_update
         ? '<span class="muted">It will be installed at the next check (within 5 minutes).</span>'
-        : '<span class="muted">Automatic updates are off, so this node stays on its version until you turn them on or the Hub sends an update.</span>');
+        : '<span class="muted">Automatic updates are off: use Install now, or it stays on its version until you turn them on or the Hub sends an update.</span>');
   } else if (u.latest) {
     html = `Up to date <span class="muted">— <code>${esc(d.version)}</code> is the latest release.</span>`;
   } else if (u.check_error) {
@@ -491,11 +572,178 @@ function renderUpdates(d) {
   }
   box.className = cls;
   status.innerHTML = html;
+  const install = document.getElementById('install-now');
+  install.hidden = !(u.update_available && !u.updating);
+  if (install.hidden) install.disabled = false;
 
   const err = document.getElementById('updates-error');
   err.hidden = !u.last_error;
   err.textContent = u.last_error || '';
 }
+
+function agoText(ts) {
+  if (!ts || String(ts).startsWith('0001')) return { text: 'never', secs: Infinity };
+  const secs = Math.max(0, Math.floor((Date.now() - new Date(ts).getTime()) / 1000));
+  let text = secs < 60 ? secs + 's ago' : secs < 3600 ? Math.floor(secs / 60) + 'm ago' : secs < 86400 ? Math.floor(secs / 3600) + 'h ago' : Math.floor(secs / 86400) + 'd ago';
+  return { text, secs };
+}
+
+async function post(url, body) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-ASDL-Agent': '1' },
+    body: body ? JSON.stringify(body) : '{}',
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || ('Request failed (' + res.status + ')'));
+  return data;
+}
+
+function renderConnection(d) {
+  const c = d.connection || {};
+  const hb = agoText(c.last_heartbeat_ok), wg = agoText(c.wg_handshake);
+  const hbOk = hb.secs < 90, wgOk = wg.secs < 180;
+  let verdict;
+  if (hbOk && wgOk) verdict = '<span class="ok-text">Connected</span>';
+  else if (!wgOk && !hbOk) verdict = '<span class="warn-text">No contact with the Hub: check this machine\'s internet connection and that the Hub\'s WireGuard port is reachable.</span>';
+  else if (wgOk && !hbOk) verdict = '<span class="warn-text">The tunnel is up but heartbeats fail: the Hub may be down or restarting.</span>';
+  else verdict = '<span class="warn-text">Heartbeats work but the tunnel handshake is stale.</span>';
+  document.getElementById('conn-verdict').innerHTML = verdict;
+  const set = (id, text, bad) => { const el = document.getElementById(id); el.textContent = text; el.className = bad ? 'bad' : ''; };
+  set('conn-hb', hb.text, !hbOk);
+  set('conn-wg', c.wg_error ? 'unknown (' + c.wg_error + ')' : wg.text, !wgOk);
+  set('conn-ping', d.ping_latency > 0 ? d.ping_latency.toFixed(1) + ' ms' : '—', false);
+  set('conn-err', c.last_error ? c.last_error + ' (' + agoText(c.last_error_at).text + ')' : 'none', !!c.last_error && !hbOk);
+}
+
+let maintBusy = false;
+function renderMaintenance(c) {
+  if (maintBusy) return;
+  const box = document.getElementById('maint-box');
+  const status = document.getElementById('maint-status');
+  const btn = document.getElementById('maint-toggle');
+  if (!c.maintenance_known) {
+    status.innerHTML = 'Maintenance mode: <span class="muted">waiting for the Hub…</span>';
+    btn.disabled = true;
+    return;
+  }
+  btn.disabled = false;
+  btn.dataset.on = c.maintenance ? '1' : '';
+  btn.textContent = c.maintenance ? 'End maintenance' : 'Start maintenance';
+  btn.className = c.maintenance ? 'btn' : 'btn btn-accent';
+  box.className = 'panel-box' + (c.maintenance ? ' warn' : '');
+  status.innerHTML = c.maintenance
+    ? '🔧 <b>This node is in maintenance.</b> <span class="muted">It gets no new apps and is never used for failover.</span>'
+    : 'Maintenance mode is <b>off</b>. <span class="muted">This node takes apps normally.</span>';
+  const r = c.maintenance_result, el = document.getElementById('maint-result');
+  if (r && c.maintenance) {
+    const lines = (r.moving || []).map(m => '↪ Moving ' + esc(m)).concat((r.stays || []).map(m => '⚠ ' + esc(m) + ' stays here: no other node is available'));
+    el.innerHTML = lines.length ? lines.join('<br>') : 'No apps were running here.';
+    el.hidden = false;
+  } else {
+    el.hidden = true;
+  }
+}
+
+document.getElementById('maint-toggle').addEventListener('click', async (e) => {
+  const on = !e.target.dataset.on;
+  const msg = on
+    ? 'Put this node into maintenance?\n\nThe Hub moves its apps to other nodes and sends it no new apps until you end maintenance.'
+    : 'End maintenance?\n\nThe node can receive apps again. Apps that were moved away stay where they are.';
+  if (!confirm(msg)) return;
+  const err = document.getElementById('maint-error');
+  maintBusy = true;
+  e.target.disabled = true;
+  e.target.textContent = 'Asking the Hub…';
+  try {
+    await post('/api/maintenance', { enabled: on });
+    err.hidden = true;
+  } catch (ex) {
+    err.hidden = false;
+    err.textContent = ex.message;
+  } finally {
+    maintBusy = false;
+    refresh();
+  }
+});
+
+function renderApps(list) {
+  const tbody = document.getElementById('apps-body');
+  if (!Array.isArray(list)) {
+    tbody.innerHTML = '<tr><td colspan="5" class="empty">Could not list containers' + (list && list.error ? ': ' + esc(list.error) : '') + '</td></tr>';
+    return;
+  }
+  if (list.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" class="empty">No containers on this node</td></tr>';
+    return;
+  }
+  list.sort((a, b) => (b.managed - a.managed) || a.name.localeCompare(b.name));
+  tbody.innerHTML = list.map(c => `
+    <tr>
+      <td>${esc(c.name)}${c.managed ? '<span class="tag" title="Started by the Hub">Hub</span>' : ''}</td>
+      <td style="color:var(--muted)">${esc(c.image)}</td>
+      <td><span class="${c.state === 'running' ? 'state-running' : 'state-other'}">${esc(c.state)}</span> <span style="color:var(--muted)">${esc(c.status)}</span></td>
+      <td style="color:var(--muted)">${esc(c.ports || '—')}</td>
+      <td style="text-align:right"><button class="btn" data-logs="${esc(c.name)}">Logs</button></td>
+    </tr>`).join('');
+}
+
+let logsFor = null;
+async function showLogs(name) {
+  logsFor = name;
+  document.getElementById('logs-modal').hidden = false;
+  document.getElementById('logs-title').textContent = 'Logs · ' + name + ' (last 300 lines)';
+  const pre = document.getElementById('logs-text');
+  pre.textContent = 'Loading…';
+  try {
+    const res = await fetch('/api/containers/' + encodeURIComponent(name) + '/logs?lines=300');
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Could not load logs');
+    pre.textContent = (data.error ? '⚠ ' + data.error + '\n\n' : '') + (data.logs || '(no output)');
+    pre.parentElement.scrollTop = pre.parentElement.scrollHeight;
+  } catch (ex) {
+    pre.textContent = ex.message;
+  }
+}
+document.getElementById('apps-body').addEventListener('click', e => {
+  const name = e.target.dataset && e.target.dataset.logs;
+  if (name) showLogs(name);
+});
+document.getElementById('logs-refresh').addEventListener('click', () => logsFor && showLogs(logsFor));
+document.getElementById('logs-close').addEventListener('click', () => { document.getElementById('logs-modal').hidden = true; });
+document.getElementById('logs-modal').addEventListener('click', e => { if (e.target.id === 'logs-modal') e.target.hidden = true; });
+
+document.getElementById('check-now').addEventListener('click', async (e) => {
+  const err = document.getElementById('updates-error');
+  e.target.disabled = true;
+  e.target.textContent = 'Checking…';
+  try {
+    await post('/api/updates/check');
+    err.hidden = true;
+    // The check takes a moment; the status refresh shows the result.
+    setTimeout(refresh, 2500);
+  } catch (ex) {
+    err.hidden = false;
+    err.textContent = ex.message;
+  } finally {
+    setTimeout(() => { e.target.disabled = false; e.target.textContent = 'Check now'; }, 2500);
+  }
+});
+
+document.getElementById('install-now').addEventListener('click', async (e) => {
+  if (!confirm('Install the new version now?\n\nThe agent restarts; apps on this node keep running.')) return;
+  const err = document.getElementById('updates-error');
+  e.target.disabled = true;
+  try {
+    await post('/api/updates/install');
+    err.hidden = true;
+    refresh();
+  } catch (ex) {
+    err.hidden = false;
+    err.textContent = ex.message;
+    e.target.disabled = false;
+  }
+});
 
 document.getElementById('auto-update').addEventListener('change', async (e) => {
   const want = e.target.checked;

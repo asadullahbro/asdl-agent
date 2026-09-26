@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/asdl/agent/internal/enrollment"
 	"github.com/asdl/agent/internal/failover"
 	"github.com/asdl/agent/internal/monitor"
+	"github.com/asdl/agent/internal/nodestate"
 	"github.com/asdl/agent/internal/runner"
 	"github.com/asdl/agent/internal/updates"
 	"github.com/asdl/agent/pkg/models"
@@ -73,11 +75,25 @@ func main() {
 	// Initialize job history and dashboard
 	jobHistory := dashboard.NewRingBuffer(20)
 	upd := updates.Load(updates.StatePath(*configPath), Version)
+	conn := &nodestate.Connection{}
 	dash := dashboard.New(mon, jobHistory, upd, cfg.HubURL, cfg.NodeID, cfg.VPNIP, Version, cfg.Dashboard.Port)
-	go dash.Start()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	dash.SetNodeState(conn, func() (time.Time, error) { return nodestate.WireGuardHandshake(ctx, cfg.VPNIP) })
+	dash.SetActions(dashboard.Actions{
+		CheckForUpdate: func() { go selfUpdate(ctx, upd, false) },
+		InstallUpdate:  func() { go selfUpdate(ctx, upd, true) },
+		SetMaintenance: func(on bool) (*models.MaintenanceResult, error) {
+			res, err := cli.SetMaintenance(on)
+			if err == nil {
+				conn.MaintenanceSet(on, res)
+			}
+			return res, err
+		},
+	})
+	go dash.Start()
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -87,7 +103,7 @@ func main() {
 		cancel()
 	}()
 
-	if err := run(ctx, cfg, mon, rnr, cli, jobHistory, upd); err != nil {
+	if err := run(ctx, cfg, mon, rnr, cli, jobHistory, upd, conn); err != nil {
 		log.Fatalf("Agent failed: %v", err)
 	}
 
@@ -96,7 +112,7 @@ func main() {
 
 func run(ctx context.Context, cfg *config.Config,
 	mon *monitor.Monitor, rnr *runner.Runner, cli *client.Client,
-	jobHistory *dashboard.RingBuffer, upd *updates.State) error {
+	jobHistory *dashboard.RingBuffer, upd *updates.State, conn *nodestate.Connection) error {
 
 	// Get system info and register
 	info, err := mon.GetSystemInfo()
@@ -122,7 +138,7 @@ func run(ctx context.Context, cfg *config.Config,
 	defer updateTicker.Stop()
 
 	// Also check immediately on startup
-	go selfUpdate(ctx, upd)
+	go selfUpdate(ctx, upd, false)
 
 	for {
 		select {
@@ -130,7 +146,7 @@ func run(ctx context.Context, cfg *config.Config,
 			return ctx.Err()
 
 		case <-updateTicker.C:
-			go selfUpdate(ctx, upd)
+			go selfUpdate(ctx, upd, false)
 
 		case <-heartbeatTicker.C:
 			heartbeat, err := mon.GetHeartbeat()
@@ -138,10 +154,19 @@ func run(ctx context.Context, cfg *config.Config,
 				log.Printf("Failed to get heartbeat: %v", err)
 				continue
 			}
-			if err := cli.SendHeartbeat(heartbeat); err != nil {
+			heartbeat.AgentVersion = Version
+			if containers, err := nodestate.Containers(ctx); err == nil {
+				heartbeat.Containers = containers
+			} else {
+				log.Printf("Could not list containers: %v", err)
+			}
+			reply, err := cli.SendHeartbeat(heartbeat)
+			if err != nil {
+				conn.HeartbeatFailed(err)
 				log.Printf("Heartbeat failed: %v", err)
 				continue
 			}
+			conn.HeartbeatOK(reply)
 			log.Printf("Heartbeat sent: CPU=%.1f%%, Mem=%dMB/%dMB",
 				heartbeat.CPUPercent,
 				heartbeat.MemoryUsed/1024/1024,
@@ -210,7 +235,17 @@ func run(ctx context.Context, cfg *config.Config,
 		}
 	}
 }
-func selfUpdate(ctx context.Context, upd *updates.State) {
+
+var updateMu sync.Mutex
+
+// selfUpdate checks for a new release and installs it when automatic updates
+// are on, or when force is set (someone pressed "Install now" on the node).
+func selfUpdate(ctx context.Context, upd *updates.State, force bool) {
+	// One check or install at a time: they share a download path.
+	if !updateMu.TryLock() {
+		return
+	}
+	defer updateMu.Unlock()
 	latest, err := getLatestVersion()
 	upd.Checked(latest, err)
 	if err != nil {
@@ -222,7 +257,7 @@ func selfUpdate(ctx context.Context, upd *updates.State) {
 		log.Printf("✅ Agent is up to date (%s)", Version)
 		return
 	}
-	if !upd.AutoUpdate() {
+	if !upd.AutoUpdate() && !force {
 		log.Printf("ℹ️ %s is available (running %s); automatic updates are off", latest, Version)
 		return
 	}

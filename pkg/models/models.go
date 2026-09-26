@@ -33,6 +33,32 @@ type Heartbeat struct {
     WiFiSignal   int       `json:"wifi_signal"`
     Uptime       int64     `json:"uptime"`
     Timestamp    time.Time `json:"timestamp"`
+    AgentVersion string      `json:"agent_version"`
+    Containers   []Container `json:"containers"`
+}
+
+// Container is one container on this node, as reported to the Hub.
+type Container struct {
+    Name      string `json:"name"`
+    Image     string `json:"image"`
+    State     string `json:"state"`  // running, exited, restarting, ...
+    Status    string `json:"status"` // Docker's text, e.g. "Up 3 hours"
+    Ports     string `json:"ports"`
+    Managed   bool   `json:"managed"` // started by the Hub
+    ProjectID string `json:"project_id,omitempty"`
+}
+
+// HeartbeatReply is what the Hub answers to a heartbeat.
+type HeartbeatReply struct {
+    Status      string `json:"status"`
+    Maintenance bool   `json:"maintenance"`
+}
+
+// MaintenanceResult is the Hub's answer to a maintenance change.
+type MaintenanceResult struct {
+    Moving []string `json:"moving"`
+    Stays  []string `json:"stays"`
+    Error  string   `json:"error"`
 }
 
 type EnvVar struct {
