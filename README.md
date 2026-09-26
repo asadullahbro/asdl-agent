@@ -29,7 +29,8 @@ machine needs no public IP or open ports.
 | **Reports health** | Sends a heartbeat every 30 seconds with CPU, memory, disk and network latency, which the Hub uses to pick where apps run. |
 | **Runs jobs** | Checks for work every 5 seconds: deploying and replacing containers, taking over apps from a failed node, removing stale copies, pulling images. |
 | **Keeps secrets out of logs** | Environment values arrive separately from commands and are never written to job logs. |
-| **Updates itself** | Checks for a new release every 5 minutes, verifies its checksum and restarts into it. |
+| **Updates itself** | Checks for a new release every 5 minutes, verifies its checksum and restarts into it. Can be turned off per node (the Hub can still push an update). |
+| **Local dashboard** | Shows the node's resources, recent jobs, its version and update status at `http://localhost:<port>`. |
 
 ## Install
 
