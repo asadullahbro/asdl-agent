@@ -51,7 +51,7 @@ func Execute(ctx context.Context, job *models.Job) *models.JobResult {
 		return exit(1)
 	}
 
-	imageName := fmt.Sprintf("%s:latest", p.Image)
+	imageName := models.ImageRef(p.Image)
 
 	write("📦 Project: %s", p.ContainerName)
 	write("🏷️  Image: %s", imageName)
@@ -64,6 +64,17 @@ func Execute(ctx context.Context, job *models.Job) *models.JobResult {
 
 	// Check local image timestamp
 	imageReady := checkLocalImage(ctx, imageName, p.LastDeployed, &logBuf, write)
+
+	if !imageReady {
+		// Method 0: pull from the registry the image came from
+		write("📥 Pulling %s...", imageName)
+		if out, err := runCmdOutput(ctx, "docker", "pull", imageName); err == nil {
+			write("✅ Image pulled")
+			imageReady = true
+		} else {
+			write("⚠️  docker pull failed: %v\n%s", err, out)
+		}
+	}
 
 	if !imageReady {
 		// Method 1: SSH transfer
