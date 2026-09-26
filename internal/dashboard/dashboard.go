@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/asdl/agent/internal/monitor"
+	"github.com/asdl/agent/internal/updates"
 )
 
 //go:embed index.html
@@ -54,6 +56,7 @@ func (r *RingBuffer) Get() []JobEntry {
 type Dashboard struct {
 	mon     *monitor.Monitor
 	jobs    *RingBuffer
+	updates *updates.State
 	hubURL  string
 	nodeID  string
 	vpnIP   string
@@ -61,10 +64,11 @@ type Dashboard struct {
 	port    int
 }
 
-func New(mon *monitor.Monitor, jobs *RingBuffer, hubURL, nodeID, vpnIP, version string, port int) *Dashboard {
+func New(mon *monitor.Monitor, jobs *RingBuffer, upd *updates.State, hubURL, nodeID, vpnIP, version string, port int) *Dashboard {
 	return &Dashboard{
 		mon:     mon,
 		jobs:    jobs,
+		updates: upd,
 		hubURL:  hubURL,
 		nodeID:  nodeID,
 		vpnIP:   vpnIP,
@@ -75,6 +79,16 @@ func New(mon *monitor.Monitor, jobs *RingBuffer, hubURL, nodeID, vpnIP, version 
 
 func (d *Dashboard) Start() {
 	mux := http.NewServeMux()
+	d.routes(mux)
+
+	addr := fmt.Sprintf(":%d", d.port)
+	log.Printf("Dashboard listening on %s", addr)
+	if err := http.ListenAndServe(addr, mux); err != nil {
+		log.Printf("Dashboard failed to start: %v", err)
+	}
+}
+
+func (d *Dashboard) routes(mux *http.ServeMux) {
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		data, err := htmlFile.ReadFile("index.html")
@@ -115,13 +129,49 @@ func (d *Dashboard) Start() {
 			"load_avg_15":  hb.LoadAvg15,
 			"ping_latency": hb.PingLatency,
 			"jobs":         d.jobs.Get(),
+			"update":       d.updates.Snapshot(),
 			"time":         time.Now().Unix(),
 		})
 	})
 
-	addr := fmt.Sprintf(":%d", d.port)
-	log.Printf("Dashboard listening on %s", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
-		log.Printf("Dashboard failed to start: %v", err)
+	// Turning automatic updates on or off is only allowed from this machine.
+	// The custom header makes browsers preflight the request, which this
+	// server doesn't allow, so other websites can't flip it either.
+	mux.HandleFunc("/api/auto-update", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"error":"use POST"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		if r.Header.Get("X-ASDL-Agent") != "1" {
+			http.Error(w, `{"error":"missing X-ASDL-Agent header"}`, http.StatusBadRequest)
+			return
+		}
+		if !fromLoopback(r) {
+			http.Error(w, `{"error":"change this setting from the node itself (http://localhost)"}`, http.StatusForbidden)
+			return
+		}
+		var req struct {
+			Enabled *bool `json:"enabled"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Enabled == nil {
+			http.Error(w, `{"error":"send {\"enabled\": true|false}"}`, http.StatusBadRequest)
+			return
+		}
+		if err := d.updates.SetAutoUpdate(*req.Enabled); err != nil {
+			log.Printf("⚠️ Could not save the auto-update setting: %v", err)
+			http.Error(w, `{"error":"could not save the setting"}`, http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(d.updates.Snapshot())
+	})
+}
+
+func fromLoopback(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return false
 	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

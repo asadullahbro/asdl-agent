@@ -22,6 +22,7 @@ import (
 	"github.com/asdl/agent/internal/failover"
 	"github.com/asdl/agent/internal/monitor"
 	"github.com/asdl/agent/internal/runner"
+	"github.com/asdl/agent/internal/updates"
 	"github.com/asdl/agent/pkg/models"
 )
 
@@ -71,7 +72,8 @@ func main() {
 
 	// Initialize job history and dashboard
 	jobHistory := dashboard.NewRingBuffer(20)
-	dash := dashboard.New(mon, jobHistory, cfg.HubURL, cfg.NodeID, cfg.VPNIP, Version, cfg.Dashboard.Port)
+	upd := updates.Load(updates.StatePath(*configPath), Version)
+	dash := dashboard.New(mon, jobHistory, upd, cfg.HubURL, cfg.NodeID, cfg.VPNIP, Version, cfg.Dashboard.Port)
 	go dash.Start()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -85,7 +87,7 @@ func main() {
 		cancel()
 	}()
 
-	if err := run(ctx, cfg, mon, rnr, cli, jobHistory); err != nil {
+	if err := run(ctx, cfg, mon, rnr, cli, jobHistory, upd); err != nil {
 		log.Fatalf("Agent failed: %v", err)
 	}
 
@@ -94,7 +96,7 @@ func main() {
 
 func run(ctx context.Context, cfg *config.Config,
 	mon *monitor.Monitor, rnr *runner.Runner, cli *client.Client,
-	jobHistory *dashboard.RingBuffer) error {
+	jobHistory *dashboard.RingBuffer, upd *updates.State) error {
 
 	// Get system info and register
 	info, err := mon.GetSystemInfo()
@@ -120,7 +122,7 @@ func run(ctx context.Context, cfg *config.Config,
 	defer updateTicker.Stop()
 
 	// Also check immediately on startup
-	go selfUpdate(ctx)
+	go selfUpdate(ctx, upd)
 
 	for {
 		select {
@@ -128,7 +130,7 @@ func run(ctx context.Context, cfg *config.Config,
 			return ctx.Err()
 
 		case <-updateTicker.C:
-			go selfUpdate(ctx)
+			go selfUpdate(ctx, upd)
 
 		case <-heartbeatTicker.C:
 			heartbeat, err := mon.GetHeartbeat()
@@ -156,6 +158,10 @@ func run(ctx context.Context, cfg *config.Config,
 			}
 
 			log.Printf("Claimed job: %s (%s)", job.ID, job.Type)
+			// The Hub can update the agent even with automatic updates off.
+			if job.Type == "agent_update" {
+				upd.Started("latest", updates.SourceHub)
+			}
 
 			var result *models.JobResult
 			switch job.Type {
@@ -190,6 +196,9 @@ func run(ctx context.Context, cfg *config.Config,
 				log.Printf("Job %s completed with status: %s", job.ID, result.Status)
 			}
 
+			if job.Type == "agent_update" && result.Status != "completed" {
+				upd.Failed("the update sent by the Hub failed; see the job's logs in the Hub")
+			}
 			// Self-restart after successful agent update
 			if job.Type == "agent_update" && result.Status == "completed" {
 				log.Println("🔄 Agent update complete, restarting process...")
@@ -201,19 +210,31 @@ func run(ctx context.Context, cfg *config.Config,
 		}
 	}
 }
-func selfUpdate(ctx context.Context) {
+func selfUpdate(ctx context.Context, upd *updates.State) {
 	latest, err := getLatestVersion()
+	upd.Checked(latest, err)
 	if err != nil {
 		log.Printf("⚠️ Version check failed: %v", err)
 		return
 	}
 
-	if latest == Version {
+	if !upd.Available() {
 		log.Printf("✅ Agent is up to date (%s)", Version)
+		return
+	}
+	if !upd.AutoUpdate() {
+		log.Printf("ℹ️ %s is available (running %s); automatic updates are off", latest, Version)
 		return
 	}
 
 	log.Printf("🔄 New version available: %s (current: %s), updating...", latest, Version)
+	upd.Started(latest, updates.SourceAuto)
+	updated := false
+	defer func() {
+		if !updated {
+			upd.Failed("the update to " + latest + " failed; still running " + Version + " (see the agent's logs)")
+		}
+	}()
 
 	binary := "asdl-agent-linux"
 	checksumCmd := "sha256sum"
@@ -298,7 +319,11 @@ func selfUpdate(ctx context.Context) {
 
 	log.Printf("✅ Updated to %s, restarting...", latest)
 	time.Sleep(1 * time.Second)
-	syscall.Exec(os.Args[0], os.Args, os.Environ())
+	if err := syscall.Exec(os.Args[0], os.Args, os.Environ()); err != nil {
+		log.Printf("⚠️ Restart after update failed: %v", err)
+		return
+	}
+	updated = true
 }
 
 func getLatestVersion() (string, error) {
@@ -309,6 +334,9 @@ func getLatestVersion() (string, error) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("GitHub returned %d", resp.StatusCode)
+	}
 	var release struct {
 		TagName string `json:"tag_name"`
 	}
