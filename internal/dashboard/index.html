@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>ASDL Agent</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJBU0RMIEFnZW50Ij4KICA8cmVjdCB4PSIwLjUiIHk9IjAuNSIgd2lkdGg9IjYzIiBoZWlnaHQ9IjYzIiByeD0iMTQiIGZpbGw9IiMwZjE0MTgiIHN0cm9rZT0iIzJiMzIzOCIvPgogIDxnIG9wYWNpdHk9IjAuNDUiPgogICAgPHBhdGggZD0iTTMyIDE1LjUgTDEzIDQ4LjUgTDUxIDQ4LjUgWiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjOWE2NDEzIiBzdHJva2Utd2lkdGg9IjUiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KICAgIDxjaXJjbGUgY3g9IjEzIiBjeT0iNDguNSIgcj0iNiIgZmlsbD0iIzlhNjQxMyIvPgogICAgPGNpcmNsZSBjeD0iNTEiIGN5PSI0OC41IiByPSI2IiBmaWxsPSIjOWE2NDEzIi8+CiAgPC9nPgogIDxjaXJjbGUgY3g9IjMyIiBjeT0iMTUuNSIgcj0iMTEuNSIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZjI5YTAwIiBzdHJva2Utd2lkdGg9IjIuNSIgb3BhY2l0eT0iMC41Ii8+CiAgPGNpcmNsZSBjeD0iMzIiIGN5PSIxNS41IiByPSI3LjUiIGZpbGw9IiNmMjlhMDAiLz4KPC9zdmc+" />
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   :root {
@@ -39,18 +40,7 @@
     align-items: center;
     gap: 10px;
   }
-  .logo-mark {
-    width: 28px;
-    height: 28px;
-    background: var(--accent);
-    border-radius: 6px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #000;
-    font-weight: 700;
-    font-size: 14px;
-  }
+  .logo-mark { width: 28px; height: 28px; flex-shrink: 0; }
   .logo-text { font-size: 14px; font-weight: 600; color: var(--text); }
   .logo-sub { font-size: 11px; color: var(--muted); margin-top: 1px; }
   .status-pill {
@@ -223,7 +213,16 @@
 
 <header>
   <div class="logo">
-    <div class="logo-mark">A</div>
+    <svg class="logo-mark" width="28" height="28" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-hidden="true">
+      <rect x="0.5" y="0.5" width="63" height="63" rx="14" fill="#0f1418" stroke="#2b3238"/>
+      <g opacity="0.45">
+        <path d="M32 15.5 L13 48.5 L51 48.5 Z" fill="none" stroke="#9a6413" stroke-width="5" stroke-linejoin="round"/>
+        <circle cx="13" cy="48.5" r="6" fill="#9a6413"/>
+        <circle cx="51" cy="48.5" r="6" fill="#9a6413"/>
+      </g>
+      <circle cx="32" cy="15.5" r="11.5" fill="none" stroke="#f29a00" stroke-width="2.5" opacity="0.5"/>
+      <circle cx="32" cy="15.5" r="7.5" fill="#f29a00"/>
+    </svg>
     <div>
       <div class="logo-text">ASDL Agent</div>
       <div class="logo-sub" id="version">loading...</div>
