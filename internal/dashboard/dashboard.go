@@ -229,6 +229,15 @@ func (d *Dashboard) routes(mux *http.ServeMux) {
 		json.NewEncoder(w).Encode(res)
 	}))
 
+	mux.HandleFunc("POST /api/containers/{name}/restart", d.localOnly(func(w http.ResponseWriter, r *http.Request) {
+		if err := nodestate.Restart(r.Context(), r.PathValue("name")); err != nil {
+			w.WriteHeader(http.StatusBadGateway)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"status": "restarted"})
+	}))
+
 	// Logs can contain secrets, so they're only served on the node itself.
 	mux.HandleFunc("GET /api/containers/{name}/logs", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

@@ -49,6 +49,20 @@ Supported: Linux (amd64) and macOS. Install Docker on the machine first.
 
 ## Managing the agent
 
+On the node, `asdl-agent` is also a command line for the running agent:
+
+```bash
+asdl-agent status                    # Hub connection, maintenance, updates, resources
+asdl-agent apps                      # containers on this node
+asdl-agent logs <app> -n 100         # a container's recent output
+asdl-agent restart <app>
+asdl-agent maintenance on|off        # move apps off this node, or end that
+asdl-agent update install            # install a new release now
+asdl-agent auto-update on|off
+```
+
+See the [command line docs](https://docs.asdl.website/hub/agent/cli/). The service itself:
+
 ```bash
 systemctl status 'asdl-agent-*'      # is it running?
 journalctl -u 'asdl-agent-*' -f      # what is it doing?

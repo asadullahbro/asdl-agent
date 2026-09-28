@@ -10,12 +10,14 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/asdl/agent/internal/cli"
 	"github.com/asdl/agent/internal/client"
 	"github.com/asdl/agent/internal/config"
 	"github.com/asdl/agent/internal/dashboard"
@@ -31,6 +33,16 @@ import (
 var Version = "dev"
 
 func main() {
+	// asdl-agent <command> is the command line; flags (as the service runs
+	// it), no arguments or "run" start the agent.
+	if cli.IsCommand(os.Args[1:]) {
+		os.Exit(cli.Run(os.Args[1:], Version))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "run" {
+		os.Args = append(os.Args[:1], os.Args[2:]...)
+	}
+	go linkCLI()
+
 	configPath := flag.String("config", config.DefaultConfigPath, "Path to config file")
 	hubURL := flag.String("hub-url", "", "Hub URL (overrides config)")
 	vpnIP := flag.String("vpn-ip", "", "VPN IP (overrides config)")
@@ -390,4 +402,52 @@ func deriveHubIP(vpnIP string) string {
 	// Replace last octet with 1
 	parts[3] = "1"
 	return strings.Join(parts, ".")
+}
+
+// cliPath is where the asdl-agent command lives for people on this machine.
+const cliPath = "/usr/local/bin/asdl-agent"
+
+// linkCLI makes sure cliPath runs this agent's binary (the service runs a
+// per-Hub copy such as asdl-agent-<hub>), so the command line stays in step
+// with the agent through updates.
+func linkCLI() {
+	if runtime.GOOS == "windows" {
+		return
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	if exe, err = filepath.EvalSymlinks(exe); err != nil {
+		return
+	}
+	if cur, err := filepath.EvalSymlinks(cliPath); err == nil && cur == exe {
+		return
+	}
+	fi, err := os.Lstat(cliPath)
+	switch {
+	case os.IsNotExist(err), err == nil && fi.Mode()&os.ModeSymlink != 0:
+		tmp := cliPath + ".tmp"
+		os.Remove(tmp)
+		if err := os.Symlink(exe, tmp); err == nil {
+			err = os.Rename(tmp, cliPath)
+			if err != nil {
+				log.Printf("⚠️ Could not link %s: %v", cliPath, err)
+			}
+		}
+	case err == nil:
+		// A plain copy from an older install: replace it with this version.
+		data, err := os.ReadFile(exe)
+		if err != nil {
+			return
+		}
+		tmp := cliPath + ".tmp"
+		if err := os.WriteFile(tmp, data, 0o755); err != nil {
+			log.Printf("⚠️ Could not update %s: %v", cliPath, err)
+			return
+		}
+		if err := os.Rename(tmp, cliPath); err != nil {
+			log.Printf("⚠️ Could not update %s: %v", cliPath, err)
+		}
+	}
 }

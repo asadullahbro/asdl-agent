@@ -79,6 +79,20 @@ func Logs(ctx context.Context, name string, lines int) (string, error) {
 	return string(out), nil
 }
 
+// Restart restarts a container.
+func Restart(ctx context.Context, name string) error {
+	if !ValidContainerName(name) {
+		return fmt.Errorf("invalid container name")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "docker", "restart", name).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docker restart: %s", strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // WireGuardHandshake returns the most recent handshake on the WireGuard
 // interface that carries vpnIP (the tunnel to the Hub), or zero if none.
 func WireGuardHandshake(ctx context.Context, vpnIP string) (time.Time, error) {
