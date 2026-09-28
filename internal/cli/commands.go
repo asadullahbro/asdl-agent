@@ -240,7 +240,22 @@ func (e *env) updateCheck(a *agent) error {
 func (e *env) updateInstall(a *agent) error {
 	upd := e.refresh(a)
 	if upd["update_available"] != true {
-		return e.updateCheck(a)
+		// The agent may not have looked yet: check now, then install.
+		before := str(upd["checked_at"])
+		if err := a.post("/api/updates/check", nil, nil); err != nil {
+			return err
+		}
+		for i := 0; i < 20 && str(upd["checked_at"]) == before; i++ {
+			time.Sleep(500 * time.Millisecond)
+			upd = e.refresh(a)
+		}
+		if upd["update_available"] != true {
+			if msg := str(upd["check_error"]); msg != "" {
+				return fmt.Errorf("couldn't check for updates: %s", msg)
+			}
+			fmt.Fprintf(e.out, "Running %s, the latest release.\n", str(upd["current"]))
+			return nil
+		}
 	}
 	target := str(upd["latest"])
 	if err := a.post("/api/updates/install", nil, nil); err != nil {
