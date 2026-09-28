@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -51,6 +52,11 @@ func main() {
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
+		// A config that exists but can't be read (usually: not root) must
+		// not lead to enrolling this node again.
+		if errors.Is(err, os.ErrPermission) {
+			log.Fatalf("Can't read %s: the agent runs as root (it's the asdl-agent-* service). For commands, run `asdl-agent help`.", *configPath)
+		}
 		log.Printf("Config load failed: %v", err)
 		cfg = &config.Config{}
 	}

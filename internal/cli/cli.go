@@ -54,7 +54,9 @@ type env struct {
 // The service runs the agent with flags (-config ...) or none.
 func IsCommand(args []string) bool {
 	if len(args) == 0 {
-		return term.IsTerminal(int(os.Stdin.Fd())) && os.Getenv("INVOCATION_ID") == ""
+		// Services start with no terminal on stdin. (INVOCATION_ID can't
+		// tell them apart: desktops start terminals under systemd too.)
+		return term.IsTerminal(int(os.Stdin.Fd()))
 	}
 	return !strings.HasPrefix(args[0], "-") && args[0] != "run"
 }
