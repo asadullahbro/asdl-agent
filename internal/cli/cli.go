@@ -37,7 +37,7 @@ Usage: asdl-agent <command> [arguments]
   auto-update on|off       Install new releases by itself, or not
   service status|restart|logs   The agent's service (restart: sudo); logs -f follows it
   config                   The agent's settings (sudo)
-  config set KEY=VALUE     Change a setting, then restart the agent
+  config set [KEY=VALUE]   Change settings (asks which, if none given), then restart
   version                  This program's version
   run                      Run the agent (what the service runs)
 

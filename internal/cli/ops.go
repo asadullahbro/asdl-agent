@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"os"
@@ -289,7 +290,43 @@ func (e *env) config(args []string) error {
 		return nil
 	case "set", "unset":
 		if len(rest) == 0 {
-			return usageError{"expected asdl-agent config " + sub + " KEY..."}
+			if !term.IsTerminal(int(os.Stdin.Fd())) {
+				return usageError{"expected asdl-agent config " + sub + " KEY..."}
+			}
+			// Ask what to change instead of taking it on the command line.
+			in := bufio.NewReader(os.Stdin)
+			q := "Which setting do you want to change? (Enter when done) "
+			if sub == "unset" {
+				q = "Which setting do you want to reset to its default? (Enter when done) "
+			}
+			for {
+				fmt.Fprint(e.out, q)
+				k, _ := in.ReadString('\n')
+				if k = strings.TrimSpace(k); k == "" {
+					break
+				}
+				if _, ok := agentSettings[k]; !ok {
+					fmt.Fprintf(e.out, "  unknown setting %q\n", k)
+					continue
+				}
+				if sub == "unset" {
+					rest = append(rest, k)
+					continue
+				}
+				cur := ""
+				if n := mapping(&doc, k, false); n != nil {
+					cur = " (now " + n.Value + ")"
+				}
+				fmt.Fprintf(e.out, "New value for %s%s: ", k, cur)
+				v, _ := in.ReadString('\n')
+				if v = strings.TrimSpace(v); v != "" {
+					rest = append(rest, k+"="+v)
+				}
+			}
+			if len(rest) == 0 {
+				fmt.Fprintln(e.out, "Nothing changed.")
+				return nil
+			}
 		}
 		for _, a := range rest {
 			k, v, ok := strings.Cut(a, "=")
