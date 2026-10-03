@@ -35,6 +35,9 @@ Usage: asdl-agent <command> [arguments]
   update                   Is a new agent release out?
   update install           Install it now
   auto-update on|off       Install new releases by itself, or not
+  service status|restart|logs   The agent's service (restart: sudo); logs -f follows it
+  config                   The agent's settings (sudo)
+  config set KEY=VALUE     Change a setting, then restart the agent
   version                  This program's version
   run                      Run the agent (what the service runs)
 
@@ -107,8 +110,13 @@ func (e *env) run(cmd string, args []string) error {
 		fmt.Fprintln(e.out, "asdl-agent", e.version)
 		return nil
 	}
-	if cmd == "doctor" {
+	switch cmd {
+	case "doctor":
 		return e.doctor()
+	case "service":
+		return e.service(args)
+	case "config":
+		return e.config(args)
 	}
 	a, err := e.findAgent()
 	if err != nil {
