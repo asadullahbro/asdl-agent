@@ -26,6 +26,7 @@ const usage = `ASDL Agent %s
 Usage: asdl-agent <command> [arguments]
 
   status                   This node: Hub connection, maintenance, updates, resources
+  doctor                   Check this node and say what to fix
   apps                     Containers on this node
   logs <app> [-n lines]    A container's recent logs
   restart <app>            Restart a container
@@ -83,6 +84,9 @@ func Run(args []string, version string) int {
 		return 0
 	}
 	if err := e.run(rest[0], rest[1:]); err != nil {
+		if err == errSilent {
+			return 1
+		}
 		var ue usageError
 		if errors.As(err, &ue) {
 			fmt.Fprintf(os.Stderr, "asdl-agent %s: %s\nRun `asdl-agent help` for the commands.\n", rest[0], ue.msg)
@@ -102,6 +106,9 @@ func (e *env) run(cmd string, args []string) error {
 	if cmd == "version" || cmd == "--version" {
 		fmt.Fprintln(e.out, "asdl-agent", e.version)
 		return nil
+	}
+	if cmd == "doctor" {
+		return e.doctor()
 	}
 	a, err := e.findAgent()
 	if err != nil {
