@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os/exec"
 	"runtime"
@@ -136,6 +137,7 @@ func (e *env) doctor() error {
 	} else if msg := str(conn["wg_error"]); msg != "" {
 		r.add(levelWarn, "Can't read the WireGuard state: "+msg, "sudo wg show")
 	}
+	e.checkAddress(r, str(s["vpn_ip"]))
 	e.checkHub(r, hubURL)
 	if on, _ := conn["maintenance"].(bool); on {
 		r.add(levelWarn, "This node is in maintenance: the Hub puts no apps here", "When you're done: asdl-agent maintenance off")
@@ -222,6 +224,34 @@ func (e *env) checkHub(r *report, hubURL string) {
 			r.add(levelWarn, fmt.Sprintf("This machine's clock is %s off from the Hub's", skew.Round(time.Second)), "Turn on time sync: sudo timedatectl set-ntp true")
 		}
 	}
+}
+
+// localAddrs lists the addresses on this machine's network interfaces.
+var localAddrs = func() ([]net.Addr, error) { return net.InterfaceAddrs() }
+
+// checkAddress compares the VPN address in the agent's config with the ones
+// this machine really has. The Hub knows a node by the address its traffic
+// comes from, so a config that names another address (or a WireGuard
+// interface that's gone) means the agent can't be recognised.
+func (e *env) checkAddress(r *report, want string) {
+	if want == "" {
+		r.add(levelFail, "The agent's config has no vpn_ip, so it counts as not enrolled", "Add this machine as a node again: https://docs.asdl.website/hub/add-a-node/")
+		return
+	}
+	addrs, err := localAddrs()
+	if err != nil {
+		r.add(levelWarn, "Can't read this machine's network addresses: "+err.Error())
+		return
+	}
+	for _, a := range addrs {
+		if ipn, ok := a.(*net.IPNet); ok && ipn.IP.String() == want {
+			r.ok("This machine has the VPN address in its config (%s)", want)
+			return
+		}
+	}
+	r.add(levelFail, "The config says this node is "+want+", but no network interface here has that address",
+		"sudo wg show (is the asdl-* interface up, and is that its address?)",
+		"The Hub decides which address a node has: if it was changed there, add this machine as a node again")
 }
 
 func meshHints(hubURL string) []string {

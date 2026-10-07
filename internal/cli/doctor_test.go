@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -13,9 +14,14 @@ import (
 )
 
 func TestDoctor_FindsProblems(t *testing.T) {
+	oldAddrs := localAddrs
+	localAddrs = func() ([]net.Addr, error) {
+		return []net.Addr{&net.IPNet{IP: net.ParseIP("10.100.0.7"), Mask: net.CIDRMask(24, 32)}}, nil
+	}
+	defer func() { localAddrs = oldAddrs }()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{
-			"hostname": "box", "version": "v1", "hub_url": "http://127.0.0.1:1",
+			"hostname": "box", "version": "v1", "vpn_ip": "10.100.0.7", "hub_url": "http://127.0.0.1:1",
 			"disk_total": 100 << 30, "disk_used": 97 << 30, "memory_total": 8 << 30, "memory_used": 2 << 30,
 			"update": map[string]any{"current": "v1", "latest": "v2", "update_available": true, "auto_update": true},
 			"connection": map[string]any{
@@ -61,5 +67,32 @@ func TestDoctor_NoAgent(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "no ASDL Agent is answering") {
 		t.Errorf("report:\n%s", out.String())
+	}
+}
+
+func TestDoctor_VPNAddress(t *testing.T) {
+	old := localAddrs
+	defer func() { localAddrs = old }()
+	has := func(ip string) func() ([]net.Addr, error) {
+		return func() ([]net.Addr, error) {
+			return []net.Addr{&net.IPNet{IP: net.ParseIP(ip), Mask: net.CIDRMask(24, 32)}}, nil
+		}
+	}
+	cases := []struct {
+		name, want, have, out string
+	}{
+		{"matches", "10.100.0.7", "10.100.0.7", "has the VPN address"},
+		{"different address", "10.100.0.7", "10.100.0.9", "no network interface here has that address"},
+		{"no address in config", "", "10.100.0.7", "no vpn_ip"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			localAddrs = has(tc.have)
+			var out bytes.Buffer
+			(&env{out: &out}).checkAddress(&report{e: &env{out: &out}}, tc.want)
+			if !strings.Contains(out.String(), tc.out) {
+				t.Errorf("report lacks %q:\n%s", tc.out, out.String())
+			}
+		})
 	}
 }
