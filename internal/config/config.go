@@ -1,10 +1,13 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath" // Add this
+	"regexp"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -13,7 +16,6 @@ import (
 type Config struct {
 	HubURL   string        `yaml:"hub_url"`
 	VPNIP    string        `yaml:"vpn_ip"`
-	NodeID   string        `yaml:"node_id"`
 	Interval time.Duration `yaml:"interval"`
 	WorkDir  string        `yaml:"work_dir"`
 	MaxJobs  int           `yaml:"max_jobs"`
@@ -51,9 +53,6 @@ func Load(path string) (*Config, error) {
 	if ip := os.Getenv("ASDL_VPN_IP"); ip != "" {
 		cfg.VPNIP = ip
 	}
-	if nodeID := os.Getenv("ASDL_NODE_ID"); nodeID != "" {
-		cfg.NodeID = nodeID
-	}
 	if dir := os.Getenv("ASDL_WORK_DIR"); dir != "" {
 		cfg.WorkDir = dir
 	}
@@ -86,9 +85,61 @@ func (c *Config) Save(path string) error {
 	return nil
 }
 
-// IsEnrolled checks if the node is already enrolled
+// IsEnrolled checks if the node is already enrolled. The node keeps no ID of
+// its own: the Hub knows which node it is from its mesh address.
 func (c *Config) IsEnrolled() bool {
-	return c.Enrolled && c.NodeID != "" && c.VPNIP != "" && c.HubURL != ""
+	return c.Enrolled && c.VPNIP != "" && c.HubURL != ""
+}
+
+// nodeIDLine matches a top-level "node_id:" key (plain or quoted).
+var nodeIDLine = regexp.MustCompile(`^(?:node_id|"node_id"|'node_id')[ \t]*:`)
+
+// RemoveNodeID deletes the node_id line from the config file at path and
+// reports whether there was one. Older agents saved the node ID the Hub gave
+// them here; the Hub now keeps it, and identifies a node by its mesh address,
+// so the node holds none. Everything else in the file (other keys, comments,
+// order, permissions) is left exactly as it was. A missing file is not an error.
+func RemoveNodeID(path string) (bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	var kept strings.Builder
+	removed := false
+	for _, line := range strings.SplitAfter(string(data), "\n") {
+		if nodeIDLine.MatchString(line) {
+			removed = true
+			continue
+		}
+		kept.WriteString(line)
+	}
+	if !removed {
+		return false, nil
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		return false, err
+	}
+	// Write beside the file and rename over it, so a crash can't leave a
+	// half-written config behind.
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(kept.String()), info.Mode().Perm()); err != nil {
+		return false, err
+	}
+	if err := os.Chmod(tmp, info.Mode().Perm()); err != nil {
+		os.Remove(tmp)
+		return false, err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return false, err
+	}
+	return true, nil
 }
 
 func detectWireGuardIP() string {

@@ -326,7 +326,6 @@
 <div class="info-grid" id="info-grid">
   <div class="info-row"><span class="info-key">Hostname</span><span class="info-val" id="hostname">—</span></div>
   <div class="info-row"><span class="info-key">VPN IP</span><span class="info-val" id="vpn-ip">—</span></div>
-  <div class="info-row"><span class="info-key">Node ID</span><span class="info-val" id="node-id">—</span></div>
   <div class="info-row"><span class="info-key">Hub</span><span class="info-val" id="hub-url">—</span></div>
   <div class="info-row"><span class="info-key">Uptime</span><span class="info-val uptime-val" id="uptime">—</span></div>
   <div class="info-row"><span class="info-key">Load avg</span><span class="info-val" id="load">—</span></div>
@@ -472,7 +471,6 @@ async function refresh() {
     // Node info
     document.getElementById('hostname').textContent = d.hostname || '—';
     document.getElementById('vpn-ip').textContent = d.vpn_ip || '—';
-    document.getElementById('node-id').textContent = (d.node_id || '—').slice(0, 16) + '...';
     document.getElementById('hub-url').textContent = d.hub_url || '—';
     document.getElementById('uptime').textContent = fmtUptime(d.uptime || 0);
     document.getElementById('load').textContent =

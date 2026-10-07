@@ -12,11 +12,16 @@ import (
     "github.com/asdl/agent/pkg/models"
 )
 
+// The Hub tells nodes apart by the mesh address their requests come from, so
+// the agent never needs (or keeps) a node ID. Routes that used to carry the ID
+// get this placeholder instead; the Hub ignores that segment.
+const self = "self"
+
 type Client struct {
     baseURL    string
-    nodeID     string
     vpnIP      string  // ADD THIS FIELD
     mu         sync.RWMutex
+    registered bool
     httpClient *http.Client
 }
 
@@ -30,16 +35,16 @@ func NewClient(baseURL string, vpnIP string) *Client {  // ADD vpnIP parameter
     }
 }
 
-func (c *Client) GetNodeID() string {
+func (c *Client) isRegistered() bool {
     c.mu.RLock()
     defer c.mu.RUnlock()
-    return c.nodeID
+    return c.registered
 }
 
-func (c *Client) setNodeID(id string) {
+func (c *Client) setRegistered() {
     c.mu.Lock()
     defer c.mu.Unlock()
-    c.nodeID = id
+    c.registered = true
 }
 
 func (c *Client) Register(info *models.NodeInfo) error {
@@ -71,22 +76,20 @@ func (c *Client) Register(info *models.NodeInfo) error {
         return fmt.Errorf("registration failed (status %d): %s", resp.StatusCode, string(body))
     }
 
-    var node models.NodeInfo
-    if err := json.NewDecoder(resp.Body).Decode(&node); err != nil {
-        return err
-    }
+    // The reply describes the node as the Hub knows it, including its ID,
+    // which this side has no use for.
+    io.Copy(io.Discard, resp.Body)
 
-    c.setNodeID(node.ID)
+    c.setRegistered()
     return nil
 }
 
 func (c *Client) SendHeartbeat(heartbeat *models.Heartbeat) (*models.HeartbeatReply, error) {
-    nodeID := c.GetNodeID()
-    if nodeID == "" {
+    if !c.isRegistered() {
         return nil, fmt.Errorf("node not registered")
     }
 
-    url := fmt.Sprintf("%s/api/v1/nodes/%s/heartbeat", c.baseURL, nodeID)
+    url := fmt.Sprintf("%s/api/v1/nodes/%s/heartbeat", c.baseURL, self)
 
     data, err := json.Marshal(heartbeat)
     if err != nil {
@@ -120,11 +123,10 @@ func (c *Client) SendHeartbeat(heartbeat *models.Heartbeat) (*models.HeartbeatRe
 // SetMaintenance asks the Hub to put this node into maintenance (or take it
 // out). The Hub moves the node's apps elsewhere when it goes in.
 func (c *Client) SetMaintenance(enabled bool) (*models.MaintenanceResult, error) {
-    nodeID := c.GetNodeID()
-    if nodeID == "" {
+    if !c.isRegistered() {
         return nil, fmt.Errorf("node not registered")
     }
-    url := fmt.Sprintf("%s/api/v1/nodes/%s/maintenance", c.baseURL, nodeID)
+    url := fmt.Sprintf("%s/api/v1/nodes/%s/maintenance", c.baseURL, self)
     data, _ := json.Marshal(map[string]bool{"enabled": enabled})
     req, err := http.NewRequest("POST", url, bytes.NewReader(data))
     if err != nil {
@@ -151,12 +153,11 @@ func (c *Client) SetMaintenance(enabled bool) (*models.MaintenanceResult, error)
 }
 
 func (c *Client) ClaimJob() (*models.Job, error) {
-    nodeID := c.GetNodeID()
-    if nodeID == "" {
+    if !c.isRegistered() {
         return nil, fmt.Errorf("node not registered")
     }
 
-    url := fmt.Sprintf("%s/api/v1/jobs/claim?node_id=%s", c.baseURL, nodeID)
+    url := c.baseURL + "/api/v1/jobs/claim"
 
     req, err := http.NewRequest("POST", url, nil)
     if err != nil {

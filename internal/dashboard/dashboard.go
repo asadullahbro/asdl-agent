@@ -71,19 +71,17 @@ type Dashboard struct {
 	wgShake func() (time.Time, error)
 	actions Actions
 	hubURL  string
-	nodeID  string
 	vpnIP   string
 	version string
 	port    int
 }
 
-func New(mon *monitor.Monitor, jobs *RingBuffer, upd *updates.State, hubURL, nodeID, vpnIP, version string, port int) *Dashboard {
+func New(mon *monitor.Monitor, jobs *RingBuffer, upd *updates.State, hubURL, vpnIP, version string, port int) *Dashboard {
 	return &Dashboard{
 		mon:     mon,
 		jobs:    jobs,
 		updates: upd,
 		hubURL:  hubURL,
-		nodeID:  nodeID,
 		vpnIP:   vpnIP,
 		version: version,
 		port:    port,
@@ -134,7 +132,6 @@ func (d *Dashboard) routes(mux *http.ServeMux) {
 		info, _ := d.mon.GetSystemInfo()
 
 		json.NewEncoder(w).Encode(map[string]any{
-			"node_id":      d.nodeID,
 			"hostname":     info.Hostname,
 			"vpn_ip":       d.vpnIP,
 			"hub_url":      d.hubURL,

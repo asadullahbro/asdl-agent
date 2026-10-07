@@ -194,7 +194,8 @@ func (e *env) findAgent() (*agent, error) {
 		if err := a.get("/api/status", &a.status); err != nil {
 			continue
 		}
-		if _, ok := a.status["node_id"]; !ok {
+		// Anything answering /api/status that reports a version is an agent
+		if _, ok := a.status["version"]; !ok {
 			continue
 		}
 		if e.hub != "" && !strings.Contains(str(a.status["hub_url"]), e.hub) && len(configPorts(e.hub)) == 0 {

@@ -20,7 +20,6 @@ type NodeInfo struct {
 
 type Heartbeat struct {
     ID           uint      `gorm:"primaryKey" json:"-"`
-    NodeID       string    `gorm:"index;not null" json:"node_id"`
     CPUPercent   float64   `json:"cpu_percent"`
     MemoryUsed   int64     `json:"memory_used"`
     MemoryTotal  int64     `json:"memory_total"`
@@ -85,7 +84,6 @@ type JobPayload struct {
 
 type Job struct {
     ID          string    `json:"id"`
-    NodeID      string    `json:"node_id"`
     Type        string    `json:"type"`
     Status      string    `json:"status"`
     Command     string    `json:"command"`

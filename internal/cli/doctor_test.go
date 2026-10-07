@@ -15,7 +15,7 @@ import (
 func TestDoctor_FindsProblems(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{
-			"node_id": "n1", "hostname": "box", "version": "v1", "hub_url": "http://127.0.0.1:1",
+			"hostname": "box", "version": "v1", "hub_url": "http://127.0.0.1:1",
 			"disk_total": 100 << 30, "disk_used": 97 << 30, "memory_total": 8 << 30, "memory_used": 2 << 30,
 			"update": map[string]any{"current": "v1", "latest": "v2", "update_available": true, "auto_update": true},
 			"connection": map[string]any{

@@ -30,7 +30,6 @@ type EnrollRequest struct {
 }
 
 type EnrollResponse struct {
-	NodeID               string `json:"node_id"`
 	AssignedIP           string `json:"assigned_ip"`
 	HubWireGuardPubKey   string `json:"hub_wireguard_public_key"`
 	HubWireGuardEndpoint string `json:"hub_wireguard_endpoint"`
@@ -111,7 +110,7 @@ func Run(configPath string) (*config.Config, error) {
 		return nil, fmt.Errorf("enrollment failed: %v", err)
 	}
 
-	fmt.Printf("✅ Enrolled! Node ID: %s\n", resp.NodeID)
+	fmt.Println("✅ Enrolled!")
 	fmt.Printf("   Assigned IP: %s\n", resp.AssignedIP)
 
 	fmt.Println()
@@ -135,7 +134,6 @@ func Run(configPath string) (*config.Config, error) {
 	cfg := &config.Config{
 		HubURL:   hubURL,
 		VPNIP:    resp.AssignedIP,
-		NodeID:   resp.NodeID,
 		Interval: 30 * time.Second,
 		WorkDir:  "/tmp/asdl",
 		MaxJobs:  5,
@@ -151,7 +149,6 @@ func Run(configPath string) (*config.Config, error) {
 	fmt.Println("║         Enrollment Complete! ✅       ║")
 	fmt.Println("╚══════════════════════════════════════╝")
 	fmt.Println()
-	fmt.Printf("   Node ID:  %s\n", resp.NodeID)
 	fmt.Printf("   VPN IP:   %s\n", resp.AssignedIP)
 	fmt.Printf("   Hub:      %s\n", hubURL)
 	fmt.Println()

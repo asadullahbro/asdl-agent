@@ -141,7 +141,7 @@ func (e *env) restartAgent(in *installed) error {
 	}
 	for i := 0; i < 20; i++ {
 		time.Sleep(time.Second)
-		if a, err := e.findAgent(); err == nil && a.status["node_id"] != nil {
+		if a, err := e.findAgent(); err == nil && a.status["version"] != nil {
 			fmt.Fprintln(e.out, e.paint(green, "The agent is back up."))
 			return nil
 		}
@@ -157,7 +157,6 @@ var agentSettings = map[string]struct{ desc, risk string }{
 	"dashboard.port": {desc: "port of the local dashboard (and this command line's connection)"},
 	"hub_url":        {desc: "the Hub's address on the mesh", risk: "the agent stops reaching the Hub if it's wrong"},
 	"vpn_ip":         {desc: "this node's mesh address", risk: "it must match the WireGuard interface, or the Hub won't recognise this node"},
-	"node_id":        {desc: "this node's ID at the Hub", risk: "the Hub would treat this machine as a different node"},
 	"enrolled":       {desc: "whether enrollment finished", risk: "false makes the agent enroll again on its next start"},
 }
 

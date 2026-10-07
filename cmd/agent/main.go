@@ -61,6 +61,14 @@ func main() {
 		cfg = &config.Config{}
 	}
 
+	// Earlier versions saved the node ID the Hub gave them. The Hub identifies
+	// this node by its mesh address and keeps the ID itself, so take it out.
+	if removed, err := config.RemoveNodeID(*configPath); err != nil {
+		log.Printf("⚠️ Could not remove the old node_id from %s: %v", *configPath, err)
+	} else if removed {
+		log.Printf("Removed the node_id saved in %s: the Hub keeps node IDs now", *configPath)
+	}
+
 	if *hubURL != "" {
 		cfg.HubURL = *hubURL
 	}
@@ -82,7 +90,6 @@ func main() {
 	log.Printf("Starting ASDL Agent %s", Version)
 	log.Printf("Hub URL: %s", cfg.HubURL)
 	log.Printf("VPN IP: %s", cfg.VPNIP)
-	log.Printf("Node ID: %s", cfg.NodeID)
 	log.Printf("Work Dir: %s", cfg.WorkDir)
 
 	hubWgIP := deriveHubIP(cfg.VPNIP)
@@ -94,7 +101,7 @@ func main() {
 	jobHistory := dashboard.NewRingBuffer(20)
 	upd := updates.Load(updates.StatePath(*configPath), Version)
 	conn := &nodestate.Connection{}
-	dash := dashboard.New(mon, jobHistory, upd, cfg.HubURL, cfg.NodeID, cfg.VPNIP, Version, cfg.Dashboard.Port)
+	dash := dashboard.New(mon, jobHistory, upd, cfg.HubURL, cfg.VPNIP, Version, cfg.Dashboard.Port)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -143,7 +150,7 @@ func run(ctx context.Context, cfg *config.Config,
 	if err := cli.Register(info); err != nil {
 		return err
 	}
-	log.Printf("Registered with hub (Node ID: %s)", cli.GetNodeID())
+	log.Printf("Registered with hub")
 
 	heartbeatTicker := time.NewTicker(cfg.Interval)
 	defer heartbeatTicker.Stop()

@@ -12,7 +12,7 @@ import (
 
 func TestAutoUpdateToggleOnlyFromThisMachine(t *testing.T) {
 	upd := updates.Load(filepath.Join(t.TempDir(), "state.json"), "v1")
-	d := New(nil, NewRingBuffer(1), upd, "", "", "", "v1", 0)
+	d := New(nil, NewRingBuffer(1), upd, "", "", "v1", 0)
 	mux := http.NewServeMux()
 	d.routes(mux)
 
