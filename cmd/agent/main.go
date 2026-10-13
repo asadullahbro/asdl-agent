@@ -24,6 +24,7 @@ import (
 	"github.com/asdl/agent/internal/dashboard"
 	"github.com/asdl/agent/internal/enrollment"
 	"github.com/asdl/agent/internal/failover"
+	"github.com/asdl/agent/internal/logstream"
 	"github.com/asdl/agent/internal/monitor"
 	"github.com/asdl/agent/internal/nodestate"
 	"github.com/asdl/agent/internal/runner"
@@ -192,12 +193,16 @@ func run(ctx context.Context, cfg *config.Config,
 				upd.Started("latest", updates.SourceHub)
 			}
 
+			// Output goes to the Hub while the job runs, so the dashboard can
+			// show it live; the full logs still go up with the result
+			live := logstream.New(job.ID, cli.SendJobLogs)
+
 			var result *models.JobResult
 			switch job.Type {
 			case "failover_start", "migrate_start":
-				result = failover.Execute(ctx, job)
+				result = failover.Execute(ctx, job, live)
 			default:
-				result, err = rnr.Execute(ctx, job)
+				result, err = rnr.Execute(ctx, job, live)
 				if err != nil {
 					log.Printf("Job execution failed: %v", err)
 					result = &models.JobResult{
@@ -208,6 +213,8 @@ func run(ctx context.Context, cfg *config.Config,
 					}
 				}
 			}
+
+			live.Close()
 
 			// Push to job history before completing
 			jobHistory.Push(dashboard.JobEntry{

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -19,15 +20,22 @@ const (
 	buildTmpDir = "/tmp/asdl-builds"
 )
 
-func Execute(ctx context.Context, job *models.Job) *models.JobResult {
+// live, if not nil, also receives the job's output as it is produced.
+func Execute(ctx context.Context, job *models.Job, live io.Writer) *models.JobResult {
+	if live == nil {
+		live = io.Discard
+	}
 	var logBuf bytes.Buffer
 	started := time.Now()
 
-	logBuf.WriteString(fmt.Sprintf("=== %s started at %s ===\n\n", job.Type, started.Format(time.RFC3339)))
+	header := fmt.Sprintf("=== %s started at %s ===\n\n", job.Type, started.Format(time.RFC3339))
+	logBuf.WriteString(header)
+	io.WriteString(live, header)
 
 	write := func(format string, args ...any) {
 		msg := fmt.Sprintf(format+"\n", args...)
 		logBuf.WriteString(msg)
+		io.WriteString(live, msg)
 		log.Print(msg)
 	}
 
@@ -68,7 +76,7 @@ func Execute(ctx context.Context, job *models.Job) *models.JobResult {
 	if !imageReady {
 		// Method 0: pull from the registry the image came from
 		write("📥 Pulling %s...", imageName)
-		if out, err := runCmdOutput(ctx, "docker", "pull", imageName); err == nil {
+		if out, err := runCmdStream(ctx, live, "docker", "pull", imageName); err == nil {
 			write("✅ Image pulled")
 			imageReady = true
 		} else {
@@ -84,7 +92,7 @@ func Execute(ctx context.Context, job *models.Job) *models.JobResult {
 		} else {
 			// Method 2: GitHub fallback
 			write("⚠️  SSH transfer failed, building from GitHub...")
-			if err := buildFromGitHub(ctx, imageName, p.Repository, &logBuf, write); err != nil {
+			if err := buildFromGitHub(ctx, live, imageName, p.Repository, &logBuf, write); err != nil {
 				write("❌ GitHub build failed: %v", err)
 				return exit(1)
 			}
@@ -190,7 +198,7 @@ func sshTransfer(ctx context.Context, sourceIP, imageName string, buf *bytes.Buf
 	return true
 }
 
-func buildFromGitHub(ctx context.Context, imageName, repoURL string, buf *bytes.Buffer, write func(string, ...any)) error {
+func buildFromGitHub(ctx context.Context, live io.Writer, imageName, repoURL string, buf *bytes.Buffer, write func(string, ...any)) error {
 	if err := os.MkdirAll(buildTmpDir, 0755); err != nil {
 		return fmt.Errorf("failed to create build dir: %w", err)
 	}
@@ -207,7 +215,7 @@ func buildFromGitHub(ctx context.Context, imageName, repoURL string, buf *bytes.
 	}
 
 	write("🔨 Building Docker image...")
-	if out, err := runCmdOutput(ctx, "docker", "build", "-t", imageName, projectDir); err != nil {
+	if out, err := runCmdStream(ctx, live, "docker", "build", "-t", imageName, projectDir); err != nil {
 		os.RemoveAll(projectDir)
 		return fmt.Errorf("build failed: %w\n%s", err, out)
 	}
@@ -228,4 +236,16 @@ func runCmdOutput(ctx context.Context, name string, args ...string) (string, err
 	cmd := exec.CommandContext(ctx, name, args...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
+}
+
+// runCmdStream is runCmdOutput that also copies the output to `live` as it
+// arrives, for the slow steps (pulls and builds) people want to watch.
+func runCmdStream(ctx context.Context, live io.Writer, name string, args ...string) (string, error) {
+	var buf bytes.Buffer
+	w := io.MultiWriter(&buf, live)
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Stdout = w
+	cmd.Stderr = w // the same writer, so exec uses one pipe and keeps the order
+	err := cmd.Run()
+	return buf.String(), err
 }

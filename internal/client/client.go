@@ -215,3 +215,30 @@ func (c *Client) CompleteJob(result *models.JobResult) error {
 
     return nil
 }
+// SendJobLogs streams part of a running job's output to the Hub. `offset` is
+// where this chunk starts in the job's output, so the Hub can ignore a resend.
+func (c *Client) SendJobLogs(jobID string, offset int, chunk string) error {
+    url := fmt.Sprintf("%s/api/v1/jobs/%s/logs", c.baseURL, jobID)
+    data, err := json.Marshal(map[string]any{"offset": offset, "chunk": chunk})
+    if err != nil {
+        return err
+    }
+    req, err := http.NewRequest("POST", url, bytes.NewReader(data))
+    if err != nil {
+        return err
+    }
+    req.Header.Set("Content-Type", "application/json")
+    resp, err := c.httpClient.Do(req)
+    if err != nil {
+        return err
+    }
+    defer resp.Body.Close()
+    // A Hub from before live logs answers 404; that is not worth retrying
+    if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusConflict {
+        return nil
+    }
+    if resp.StatusCode != http.StatusOK {
+        return fmt.Errorf("log stream failed (status %d)", resp.StatusCode)
+    }
+    return nil
+}

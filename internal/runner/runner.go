@@ -115,7 +115,11 @@ echo "✅ Image pulled successfully"`,
     }
 }
 
-func (r *Runner) Execute(ctx context.Context, job *models.Job) (*models.JobResult, error) {
+// live, if not nil, also receives the job's output as it is produced.
+func (r *Runner) Execute(ctx context.Context, job *models.Job, live io.Writer) (*models.JobResult, error) {
+    if live == nil {
+        live = io.Discard
+    }
     jobDir := fmt.Sprintf("%s/%s", r.workDir, job.ID)
     if err := os.MkdirAll(jobDir, 0755); err != nil {
         return nil, fmt.Errorf("failed to create work dir: %w", err)
@@ -140,6 +144,8 @@ func (r *Runner) Execute(ctx context.Context, job *models.Job) (*models.JobResul
     logBuffer.WriteString(fmt.Sprintf("Command: %s\n", command))
     logBuffer.WriteString(fmt.Sprintf("Working Dir: %s\n", job.WorkingDir))
     logBuffer.WriteString("====================================\n\n")
+    // The live view skips the command line: it can carry environment values
+    fmt.Fprintf(live, "=== Job %s started at %s ===\nType: %s\n\n", job.ID, time.Now().Format(time.RFC3339), job.Type)
 
     cmd := exec.CommandContext(ctx, "sh", "-c", command)
     cmd.Dir = jobDir
@@ -196,11 +202,11 @@ func (r *Runner) Execute(ctx context.Context, job *models.Job) (*models.JobResul
     wg.Add(2)
     go func() {
         defer wg.Done()
-        io.Copy(io.MultiWriter(&logBuffer, &stdoutBuf), stdout)
+        io.Copy(io.MultiWriter(&logBuffer, &stdoutBuf, live), stdout)
     }()
     go func() {
         defer wg.Done()
-        io.Copy(io.MultiWriter(&logBuffer, &stderrBuf), stderr)
+        io.Copy(io.MultiWriter(&logBuffer, &stderrBuf, live), stderr)
     }()
 
     // Wait for completion
