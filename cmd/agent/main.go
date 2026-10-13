@@ -152,8 +152,11 @@ func run(ctx context.Context, cfg *config.Config,
 	}
 	log.Printf("Registered with hub")
 
-	heartbeatTicker := time.NewTicker(cfg.Interval)
-	defer heartbeatTicker.Stop()
+	// Heartbeats run on their own goroutine. Jobs run inline in the loop below
+	// and a deploy can take minutes (image pulls); if heartbeats shared the
+	// loop the Hub would see the node go silent mid-deploy, mark it offline
+	// and fail its apps over.
+	go heartbeatLoop(ctx, cfg.Interval, mon, cli, conn)
 
 	jobTicker := time.NewTicker(5 * time.Second)
 	defer jobTicker.Stop()
@@ -172,30 +175,6 @@ func run(ctx context.Context, cfg *config.Config,
 
 		case <-updateTicker.C:
 			go selfUpdate(ctx, upd, false)
-
-		case <-heartbeatTicker.C:
-			heartbeat, err := mon.GetHeartbeat()
-			if err != nil {
-				log.Printf("Failed to get heartbeat: %v", err)
-				continue
-			}
-			heartbeat.AgentVersion = Version
-			if containers, err := nodestate.Containers(ctx); err == nil {
-				heartbeat.Containers = containers
-			} else {
-				log.Printf("Could not list containers: %v", err)
-			}
-			reply, err := cli.SendHeartbeat(heartbeat)
-			if err != nil {
-				conn.HeartbeatFailed(err)
-				log.Printf("Heartbeat failed: %v", err)
-				continue
-			}
-			conn.HeartbeatOK(reply)
-			log.Printf("Heartbeat sent: CPU=%.1f%%, Mem=%dMB/%dMB",
-				heartbeat.CPUPercent,
-				heartbeat.MemoryUsed/1024/1024,
-				heartbeat.MemoryTotal/1024/1024)
 
 		case <-jobTicker.C:
 			job, err := cli.ClaimJob()
@@ -259,6 +238,45 @@ func run(ctx context.Context, cfg *config.Config,
 			}
 		}
 	}
+}
+
+func heartbeatLoop(ctx context.Context, interval time.Duration,
+	mon *monitor.Monitor, cli *client.Client, conn *nodestate.Connection) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			sendHeartbeat(ctx, mon, cli, conn)
+		}
+	}
+}
+
+func sendHeartbeat(ctx context.Context, mon *monitor.Monitor, cli *client.Client, conn *nodestate.Connection) {
+	heartbeat, err := mon.GetHeartbeat()
+	if err != nil {
+		log.Printf("Failed to get heartbeat: %v", err)
+		return
+	}
+	heartbeat.AgentVersion = Version
+	if containers, err := nodestate.Containers(ctx); err == nil {
+		heartbeat.Containers = containers
+	} else {
+		log.Printf("Could not list containers: %v", err)
+	}
+	reply, err := cli.SendHeartbeat(heartbeat)
+	if err != nil {
+		conn.HeartbeatFailed(err)
+		log.Printf("Heartbeat failed: %v", err)
+		return
+	}
+	conn.HeartbeatOK(reply)
+	log.Printf("Heartbeat sent: CPU=%.1f%%, Mem=%dMB/%dMB",
+		heartbeat.CPUPercent,
+		heartbeat.MemoryUsed/1024/1024,
+		heartbeat.MemoryTotal/1024/1024)
 }
 
 var updateMu sync.Mutex
