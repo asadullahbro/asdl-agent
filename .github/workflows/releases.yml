@@ -3,10 +3,12 @@ on:
   push:
     branches:
       - main
-    # Every release is installed by all nodes; don't cut one for docs changes.
+    # Every release is installed by all nodes; don't cut one for docs or
+    # workflow-only changes.
     paths-ignore:
       - '**.md'
       - '.github/assets/**'
+      - '.github/workflows/**'
 jobs:
   release:
     runs-on: ubuntu-latest
