@@ -1,6 +1,7 @@
 package client
 
 import (
+    "github.com/asdl/agent/internal/logstream"
     "bytes"
     "encoding/json"
     "fmt"
@@ -234,8 +235,13 @@ func (c *Client) SendJobLogs(jobID string, offset int, chunk string) error {
     }
     defer resp.Body.Close()
     // A Hub from before live logs answers 404; that is not worth retrying
-    if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusConflict {
+    if resp.StatusCode == http.StatusNotFound {
         return nil
+    }
+    // 409: the Hub no longer has this job running (it was cancelled, or marked
+    // failed because we took too long). Say so, so the agent stops it.
+    if resp.StatusCode == http.StatusConflict {
+        return logstream.ErrEnded
     }
     if resp.StatusCode != http.StatusOK {
         return fmt.Errorf("log stream failed (status %d)", resp.StatusCode)

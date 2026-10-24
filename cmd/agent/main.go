@@ -34,6 +34,9 @@ import (
 
 var Version = "dev"
 
+// maxJobTime is the longest a single job may run before the agent stops it.
+const maxJobTime = 2 * time.Hour
+
 func main() {
 	// asdl-agent <command> is the command line; flags (as the service runs
 	// it), no arguments or "run" start the agent.
@@ -195,14 +198,21 @@ func run(ctx context.Context, cfg *config.Config,
 
 			// Output goes to the Hub while the job runs, so the dashboard can
 			// show it live; the full logs still go up with the result
-			live := logstream.New(job.ID, cli.SendJobLogs)
+			// A job stops when the Hub says it is over (cancelled, or marked
+			// failed), or after maxJobTime. Jobs run one at a time, so one that
+			// never ends would hold up every deploy behind it.
+			endedCtx, hubEnded := context.WithCancelCause(ctx)
+			jobCtx, stopTimer := context.WithTimeoutCause(endedCtx, maxJobTime, fmt.Errorf("took longer than %s", maxJobTime))
+			live := logstream.New(job.ID, cli.SendJobLogs, func() {
+				hubEnded(errors.New("the Hub says this job is over")) // nobody is waiting for it
+			})
 
 			var result *models.JobResult
 			switch job.Type {
 			case "failover_start", "migrate_start":
-				result = failover.Execute(ctx, job, live)
+				result = failover.Execute(jobCtx, job, live)
 			default:
-				result, err = rnr.Execute(ctx, job, live)
+				result, err = rnr.Execute(jobCtx, job, live)
 				if err != nil {
 					log.Printf("Job execution failed: %v", err)
 					result = &models.JobResult{
@@ -215,6 +225,8 @@ func run(ctx context.Context, cfg *config.Config,
 			}
 
 			live.Close()
+			stopTimer()
+			hubEnded(nil)
 
 			// Push to job history before completing
 			jobHistory.Push(dashboard.JobEntry{

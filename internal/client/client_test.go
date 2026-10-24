@@ -1,6 +1,8 @@
 package client
 
 import (
+	"errors"
+	"github.com/asdl/agent/internal/logstream"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -131,5 +133,28 @@ func TestFailedRegistrationDoesNotCountAsRegistered(t *testing.T) {
 	}
 	if _, err := c.SendHeartbeat(&models.Heartbeat{}); err == nil {
 		t.Error("a failed registration must not allow heartbeats")
+	}
+}
+
+// The Hub answering 409 to a log upload means the job is no longer running
+// there; the agent has to be told so it can stop the job.
+func TestSendJobLogsReportsAnEndedJob(t *testing.T) {
+	status := 409
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(status)
+	}))
+	defer srv.Close()
+	c := NewClient(srv.URL, "10.0.0.2")
+
+	if err := c.SendJobLogs("j", 0, "x"); !errors.Is(err, logstream.ErrEnded) {
+		t.Fatalf("409 gave %v, want ErrEnded", err)
+	}
+	status = 404 // a Hub from before live logs: not an error
+	if err := c.SendJobLogs("j", 0, "x"); err != nil {
+		t.Fatalf("404 gave %v, want nil", err)
+	}
+	status = 200
+	if err := c.SendJobLogs("j", 0, "x"); err != nil {
+		t.Fatalf("200 gave %v", err)
 	}
 }

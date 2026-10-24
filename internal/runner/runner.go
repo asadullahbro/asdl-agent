@@ -149,6 +149,9 @@ func (r *Runner) Execute(ctx context.Context, job *models.Job, live io.Writer) (
 
     cmd := exec.CommandContext(ctx, "sh", "-c", command)
     cmd.Dir = jobDir
+    // Cancelling the job must stop what the shell started too (a `docker logs -f`
+    // is a child of sh), not just sh, or the job never ends
+    killWithChildren(cmd)
 
     // Set environment variables
     env := os.Environ()
@@ -225,6 +228,10 @@ func (r *Runner) Execute(ctx context.Context, job *models.Job, live io.Writer) (
         } else if err != context.Canceled {
             exitCode = -1
         }
+    }
+
+    if ctx.Err() != nil {
+        logBuffer.WriteString(fmt.Sprintf("\nStopped: %v\n", context.Cause(ctx)))
     }
 
     // Add summary
