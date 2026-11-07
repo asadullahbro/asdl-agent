@@ -1,6 +1,7 @@
 package client
 
 import (
+    "context"
     "github.com/asdl/agent/internal/logstream"
     "bytes"
     "encoding/json"
@@ -263,4 +264,26 @@ func (e *StatusError) Error() string {
 // slow down (429) or timed out (408). Anything else is a refusal that won't change.
 func (e *StatusError) Retryable() bool {
     return e.Code >= 500 || e.Code == http.StatusTooManyRequests || e.Code == http.StatusRequestTimeout
+}
+
+// GoingAway tells the Hub this agent is stopping on purpose (the service was stopped, or the machine is shutting
+// down), so the outage that follows is recorded as planned and not held against the node. Best effort: it gives
+// up after timeout, and an older Hub without the endpoint just answers 404.
+func (c *Client) GoingAway(timeout time.Duration) error {
+    url := fmt.Sprintf("%s/api/v1/nodes/%s/going-away", c.baseURL, self)
+    ctx, cancel := context.WithTimeout(context.Background(), timeout)
+    defer cancel()
+    req, err := http.NewRequestWithContext(ctx, "POST", url, nil)
+    if err != nil {
+        return err
+    }
+    resp, err := c.httpClient.Do(req)
+    if err != nil {
+        return err
+    }
+    defer resp.Body.Close()
+    if resp.StatusCode != http.StatusOK {
+        return &StatusError{Code: resp.StatusCode}
+    }
+    return nil
 }

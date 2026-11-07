@@ -83,3 +83,25 @@ func TestReportResult_StopsOnRefusal(t *testing.T) {
 		t.Errorf("retried a refusal %d times", calls.Load())
 	}
 }
+
+func TestGoingAway_TellsTheHub(t *testing.T) {
+	var path string
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.Method + " " + r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer hub.Close()
+	if err := client.NewClient(hub.URL, "10.0.0.2").GoingAway(time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if path != "POST /api/v1/nodes/self/going-away" {
+		t.Errorf("sent %q", path)
+	}
+
+	// An older Hub without the endpoint: an error to log, nothing more.
+	old := httptest.NewServer(http.NotFoundHandler())
+	defer old.Close()
+	if err := client.NewClient(old.URL, "10.0.0.2").GoingAway(time.Second); err == nil {
+		t.Error("a 404 was taken as delivered")
+	}
+}

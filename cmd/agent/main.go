@@ -129,6 +129,10 @@ func main() {
 	go func() {
 		<-sigChan
 		log.Println("Received shutdown signal")
+		// Tell the Hub this is on purpose, so the outage isn't held against the node.
+		if err := cli.GoingAway(3 * time.Second); err != nil {
+			log.Printf("Could not tell the Hub this agent is stopping: %v", err)
+		}
 		cancel()
 	}()
 
