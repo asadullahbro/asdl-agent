@@ -181,81 +181,130 @@ func run(ctx context.Context, cfg *config.Config,
 			go selfUpdate(ctx, upd, false)
 
 		case <-jobTicker.C:
-			job, err := cli.ClaimJob()
-			if err != nil {
-				log.Printf("Failed to claim job: %v", err)
-				continue
-			}
-			if job == nil {
-				continue
-			}
-
-			log.Printf("Claimed job: %s (%s)", job.ID, job.Type)
-			// The Hub can update the agent even with automatic updates off.
-			if job.Type == "agent_update" {
-				upd.Started("latest", updates.SourceHub)
-			}
-
-			// Output goes to the Hub while the job runs, so the dashboard can
-			// show it live; the full logs still go up with the result
-			// A job stops when the Hub says it is over (cancelled, or marked
-			// failed), or after maxJobTime. Jobs run one at a time, so one that
-			// never ends would hold up every deploy behind it.
-			endedCtx, hubEnded := context.WithCancelCause(ctx)
-			jobCtx, stopTimer := context.WithTimeoutCause(endedCtx, maxJobTime, fmt.Errorf("took longer than %s", maxJobTime))
-			live := logstream.New(job.ID, cli.SendJobLogs, func() {
-				hubEnded(errors.New("the Hub says this job is over")) // nobody is waiting for it
-			})
-
-			var result *models.JobResult
-			switch job.Type {
-			case "failover_start", "migrate_start":
-				result = failover.Execute(jobCtx, job, live)
-			default:
-				result, err = rnr.Execute(jobCtx, job, live)
-				if err != nil {
-					log.Printf("Job execution failed: %v", err)
-					result = &models.JobResult{
-						JobID:    job.ID,
-						Status:   "failed",
-						Logs:     err.Error(),
-						ExitCode: -1,
+			// Claim jobs until the Hub has none this node may start now. The Hub decides how many run at once
+			// (the node's parallel jobs setting, its free memory, never two for one app); maxParallelJobs is
+			// only this agent's own ceiling.
+			for slots.tryStart() {
+				job, err := cli.ClaimJob()
+				if err != nil || job == nil {
+					slots.done()
+					if err != nil {
+						log.Printf("Failed to claim job: %v", err)
 					}
+					break
 				}
-			}
-
-			live.Close()
-			stopTimer()
-			hubEnded(nil)
-
-			// Push to job history before completing
-			jobHistory.Push(dashboard.JobEntry{
-				ID:        job.ID,
-				Type:      job.Type,
-				Status:    result.Status,
-				CreatedAt: job.CreatedAt,
-				EndedAt:   time.Now(),
-				ExitCode:  result.ExitCode,
-			})
-
-			if err := cli.CompleteJob(result); err != nil {
-				log.Printf("Failed to report job completion: %v", err)
-			} else {
-				log.Printf("Job %s completed with status: %s", job.ID, result.Status)
-			}
-
-			if job.Type == "agent_update" && result.Status != "completed" {
-				upd.Failed("the update sent by the Hub failed; see the job's logs in the Hub")
-			}
-			// Self-restart after successful agent update
-			if job.Type == "agent_update" && result.Status == "completed" {
-				log.Println("🔄 Agent update complete, restarting process...")
-				time.Sleep(1 * time.Second)
-				if err := syscall.Exec(os.Args[0], os.Args, os.Environ()); err != nil {
-					log.Printf("⚠️ Self-restart failed: %v", err)
-				}
+				go func(job *models.Job) {
+					defer slots.done()
+					runJob(ctx, job, rnr, cli, jobHistory, upd)
+				}(job)
 			}
 		}
+	}
+}
+
+// runJob runs one claimed job and reports its result to the Hub.
+func runJob(ctx context.Context, job *models.Job, rnr *runner.Runner, cli *client.Client,
+	jobHistory *dashboard.RingBuffer, upd *updates.State) {
+	log.Printf("Claimed job: %s (%s)", job.ID, job.Type)
+	// The Hub can update the agent even with automatic updates off.
+	if job.Type == "agent_update" {
+		upd.Started("latest", updates.SourceHub)
+	}
+
+	// Output goes to the Hub while the job runs, so the dashboard can show it live; the full logs still go up
+	// with the result. A job stops when the Hub says it is over (cancelled, or marked failed), or after
+	// maxJobTime, so one that never ends can't hold its slot for good.
+	endedCtx, hubEnded := context.WithCancelCause(ctx)
+	jobCtx, stopTimer := context.WithTimeoutCause(endedCtx, maxJobTime, fmt.Errorf("took longer than %s", maxJobTime))
+	live := logstream.New(job.ID, cli.SendJobLogs, func() {
+		hubEnded(errors.New("the Hub says this job is over")) // nobody is waiting for it
+	})
+
+	var result *models.JobResult
+	switch job.Type {
+	case "failover_start", "migrate_start":
+		result = failover.Execute(jobCtx, job, live)
+	default:
+		var err error
+		result, err = rnr.Execute(jobCtx, job, live)
+		if err != nil {
+			log.Printf("Job execution failed: %v", err)
+			result = &models.JobResult{
+				JobID:    job.ID,
+				Status:   "failed",
+				Logs:     err.Error(),
+				ExitCode: -1,
+			}
+		}
+	}
+
+	live.Close()
+	stopTimer()
+	hubEnded(nil)
+
+	jobHistory.Push(dashboard.JobEntry{
+		ID:        job.ID,
+		Type:      job.Type,
+		Status:    result.Status,
+		CreatedAt: job.CreatedAt,
+		EndedAt:   time.Now(),
+		ExitCode:  result.ExitCode,
+	})
+
+	if err := reportResult(ctx, cli, result); err != nil {
+		log.Printf("⚠️ Gave up reporting job %s (%s): %v", job.ID, result.Status, err)
+	} else {
+		log.Printf("Job %s completed with status: %s", job.ID, result.Status)
+	}
+
+	if job.Type == "agent_update" && result.Status != "completed" {
+		upd.Failed("the update sent by the Hub failed; see the job's logs in the Hub")
+	}
+	// Self-restart after a successful agent update. The Hub runs an update alone, but wait for anything
+	// else anyway: a restart would cut it off and its result would never reach the Hub.
+	if job.Type == "agent_update" && result.Status == "completed" {
+		log.Println("🔄 Agent update complete, restarting process...")
+		slots.drain(1, maxJobTime) // 1: this job
+		time.Sleep(1 * time.Second)
+		if err := syscall.Exec(os.Args[0], os.Args, os.Environ()); err != nil {
+			log.Printf("⚠️ Self-restart failed: %v", err)
+			slots.resume()
+		}
+	}
+}
+
+// reportRetryFor is how long the agent keeps trying to report a job's result. The Hub can be away for a minute
+// or two (it restarts to update, or the network drops); a result that never arrives leaves the Hub believing
+// the job is still running until it gives up on it, and then it may start the app a second time elsewhere.
+const reportRetryFor = 15 * time.Minute
+
+// reportFirstWait is the pause before the first retry; it doubles each time, up to a minute.
+var reportFirstWait = 2 * time.Second
+
+// reportResult sends a job's result to the Hub, retrying with backoff while the Hub can't be reached or
+// answers with a server error. A refusal (the job is gone, or isn't this node's) is final.
+func reportResult(ctx context.Context, cli *client.Client, result *models.JobResult) error {
+	deadline := time.Now().Add(reportRetryFor)
+	wait := reportFirstWait
+	for {
+		err := cli.CompleteJob(result)
+		if err == nil {
+			return nil
+		}
+		var refused *client.StatusError
+		if errors.As(err, &refused) && !refused.Retryable() {
+			return err
+		}
+		if time.Now().Add(wait).After(deadline) {
+			return err
+		}
+		log.Printf("Could not report job %s yet (%v); trying again in %s", result.JobID, err, wait)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(wait):
+		}
+		wait = min(wait*2, time.Minute)
 	}
 }
 
@@ -414,10 +463,13 @@ func selfUpdate(ctx context.Context, upd *updates.State, force bool) {
 		return
 	}
 
-	log.Printf("✅ Updated to %s, restarting...", latest)
+	log.Printf("✅ Updated to %s, restarting once running jobs finish...", latest)
+	// A restart cuts off running jobs and loses their results; claim nothing new and let them finish first.
+	slots.drain(0, maxJobTime)
 	time.Sleep(1 * time.Second)
 	if err := syscall.Exec(os.Args[0], os.Args, os.Environ()); err != nil {
 		log.Printf("⚠️ Restart after update failed: %v", err)
+		slots.resume()
 		return
 	}
 	updated = true

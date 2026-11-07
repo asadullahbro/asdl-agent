@@ -211,7 +211,7 @@ func (c *Client) CompleteJob(result *models.JobResult) error {
 
     if resp.StatusCode != http.StatusOK {
         body, _ := io.ReadAll(resp.Body)
-        return fmt.Errorf("completion failed (status %d): %s", resp.StatusCode, string(body))
+        return &StatusError{Code: resp.StatusCode, Body: string(body)}
     }
 
     return nil
@@ -247,4 +247,20 @@ func (c *Client) SendJobLogs(jobID string, offset int, chunk string) error {
         return fmt.Errorf("log stream failed (status %d)", resp.StatusCode)
     }
     return nil
+}
+
+// StatusError is the Hub answering a job report with something other than 200.
+type StatusError struct {
+    Code int
+    Body string
+}
+
+func (e *StatusError) Error() string {
+    return fmt.Sprintf("completion failed (status %d): %s", e.Code, e.Body)
+}
+
+// Retryable reports whether sending the same report again may work: the Hub had a problem (5xx), or asked to
+// slow down (429) or timed out (408). Anything else is a refusal that won't change.
+func (e *StatusError) Retryable() bool {
+    return e.Code >= 500 || e.Code == http.StatusTooManyRequests || e.Code == http.StatusRequestTimeout
 }

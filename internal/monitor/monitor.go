@@ -145,7 +145,8 @@ func (m *Monitor) GetHeartbeat() (*models.Heartbeat, error) {
 }
 
 func (m *Monitor) detectCapabilities() []string {
-	caps := []string{"bash"}
+	// parallel_jobs: this agent runs as many jobs at once as the Hub hands it, so the Hub may start several.
+	caps := []string{"bash", "parallel_jobs"}
 
 	// Check for Docker
 	if _, err := os.Stat("/var/run/docker.sock"); err == nil {
